@@ -1,154 +1,163 @@
+require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const cron = require("node-cron");
 const fs = require("fs");
 
-const TOKEN = process.env.BOT_TOKEN;
-const bot = new TelegramBot(TOKEN, { polling: true });
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
-const DATA_FILE = "./data.json";
+const DATA_FILE = "data.json";
 
-function loadData() {
-  return JSON.parse(fs.readFileSync(DATA_FILE));
+// дела
+const TASKS = [
+  "🍽 Помыть посуду",
+  "🗑 Вынести мусор",
+  "🧸 Разложить вещи",
+  "🧽 Вытереть пыль",
+  "🧺 Стирка (если есть)",
+  "👕 Разобрать стирку",
+  "🧹 Пылесос"
+];
+
+let data = {
+  chatId: null,
+  family: [],
+  dutyIndex: 0,
+  stats: {},
+  doneToday: false
+};
+
+// загрузка
+if (fs.existsSync(DATA_FILE)) {
+  data = JSON.parse(fs.readFileSync(DATA_FILE));
 }
 
-function saveData(data) {
+// сохранение
+function save() {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-const TASKS = [
-  "Посуду",
-  "Мусор",
-  "Порядок",
-  "Пыль",
-  "Стирка",
-  "Пылесос"
-];
+// получить имя
+function getName(user) {
+  return user.first_name || user.username;
+}
 
-let familyChatId = null;
-
-bot.on("message", (msg) => {
-  if (msg.chat.type === "group" || msg.chat.type === "supergroup") {
-    familyChatId = msg.chat.id;
-  }
-});
-
-
-// ===== регистрация семьи =====
+// регистрация чата
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, "Я семейный бот дежурств 🧹\nНапишите /join каждый участник");
+  data.chatId = msg.chat.id;
+  save();
+  bot.sendMessage(msg.chat.id, "🏠 Семейный бот активирован.\nВсе пишите /join");
 });
 
+// вступить в семью
 bot.onText(/\/join/, (msg) => {
-  const data = loadData();
-  const user = msg.from.first_name;
+  const name = getName(msg.from);
 
-  if (!data.family.includes(user)) {
-    data.family.push(user);
-    data.queue.push(user);
-    data.stats[user] = 0;
-    saveData(data);
-    bot.sendMessage(msg.chat.id, `${user} добавлен в семью`);
-  } else {
-    bot.sendMessage(msg.chat.id, "Ты уже в списке");
+  if (!data.family.includes(name)) {
+    data.family.push(name);
+    data.stats[name] = 0;
+    save();
+    bot.sendMessage(data.chatId, `${name} добавлен в семью 😈`);
   }
 });
 
+// рейтинг
+bot.onText(/\/rating/, (msg) => {
+  let text = "🏆 Рейтинг семьи:\n\n";
 
-// ===== утреннее сообщение =====
-function sendMorning() {
-  const data = loadData();
-  if (!familyChatId || data.queue.length === 0) return;
+  Object.entries(data.stats)
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([name, score]) => {
+      text += `${name}: ${score} баллов\n`;
+    });
 
-  const duty = data.queue[data.currentDutyIndex];
+  bot.sendMessage(data.chatId, text);
+});
 
-  data.tasksToday = {};
-  TASKS.forEach(t => data.tasksToday[t] = false);
-  saveData(data);
+// кто сегодня
+function todayPerson() {
+  if (data.family.length === 0) return null;
+  return data.family[data.dutyIndex % data.family.length];
+}
 
-  const buttons = TASKS.map(t => [{ text: "☐ " + t, callback_data: "task_" + t }]);
+// утро 7:30
+cron.schedule("30 7 * * *", () => {
+  if (!data.chatId) return;
+  if (data.family.length === 0) return;
 
-  buttons.push([{ text: "❌ Пропустить сегодня", callback_data: "skip" }]);
+  const name = todayPerson();
+  data.doneToday = false;
+  save();
 
-  bot.sendMessage(familyChatId,
-    `🌅 Доброе утро!\nСегодня дежурит: *${duty}*`,
-    {
-      parse_mode: "Markdown",
-      reply_markup: { inline_keyboard: buttons }
+  let text = `☀️ Доброе утро\n\nСегодня дежурит: ${name}\n\nСписок дел:\n`;
+  TASKS.forEach(t => text += "• " + t + "\n");
+
+  bot.sendMessage(data.chatId, text, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "✅ Всё сделано", callback_data: "done" }],
+        [{ text: "🤏 Частично", callback_data: "partial" }],
+        [{ text: "😴 Пропустить", callback_data: "skip" }]
+      ]
     }
-  );
-}
+  });
+}, {
+  timezone: "Europe/Berlin"
+});
 
+// вечер 21:00 проверка
+cron.schedule("0 21 * * *", () => {
+  if (!data.chatId) return;
 
-// ===== вечерняя проверка =====
-function sendEvening() {
-  const data = loadData();
-  if (!familyChatId || data.queue.length === 0) return;
+  if (!data.doneToday) {
+    const name = todayPerson();
+    data.stats[name] -= 2;
 
-  const duty = data.queue[data.currentDutyIndex];
-  const done = Object.values(data.tasksToday).filter(v => v).length;
+    bot.sendMessage(data.chatId,
+      `🚨 ${name} ничего не отметил!\nШТРАФ −2\nЗавтра снова дежурит 😈`);
 
-  let msg = `🌙 Проверка дня\nДежурный: ${duty}\nВыполнено: ${done}/${TASKS.length}\n`;
-
-  if (done === TASKS.length) {
-    msg += "🔥 Идеально! +1 балл";
-    data.stats[duty] += 1;
-  } else if (done === 0) {
-    msg += "😡 Ничего не сделано. Штраф!";
-    data.stats[duty] -= 1;
-  } else {
-    msg += "🙂 Частично сделано";
+    save();
+    return;
   }
 
-  // следующий
-  data.currentDutyIndex++;
-  if (data.currentDutyIndex >= data.queue.length) {
-    data.currentDutyIndex = 0;
+  // если сделал — следующий
+  data.dutyIndex++;
+  save();
+}, {
+  timezone: "Europe/Berlin"
+});
+
+// кнопки
+bot.on("callback_query", (q) => {
+  const action = q.data;
+  const name = todayPerson();
+
+  if (action === "done") {
+    data.stats[name] += 2;
+    data.doneToday = true;
+
+    bot.sendMessage(data.chatId,
+      `🔥 ${name} всё сделал!\n+2 балла\nГерой семьи`);
+
   }
 
-  saveData(data);
+  if (action === "partial") {
+    data.stats[name] += 1;
+    data.doneToday = true;
 
-  bot.sendMessage(familyChatId, msg);
-}
-
-
-// ===== кнопки =====
-bot.on("callback_query", (query) => {
-  const data = loadData();
-  const action = query.data;
-
-  if (action.startsWith("task_")) {
-    const task = action.replace("task_", "");
-    data.tasksToday[task] = !data.tasksToday[task];
-    saveData(data);
-
-    bot.answerCallbackQuery(query.id, { text: `${task} отмечено` });
+    bot.sendMessage(data.chatId,
+      `👍 ${name} сделал частично\n+1 балл`);
   }
 
   if (action === "skip") {
-    data.currentDutyIndex++;
-    if (data.currentDutyIndex >= data.queue.length) data.currentDutyIndex = 0;
-    saveData(data);
+    data.stats[name] -= 1;
+    data.doneToday = true;
 
-    bot.sendMessage(familyChatId, "Сегодня пропуск. Следующий дежурный завтра.");
-  }
-});
-
-
-// ===== статистика =====
-bot.onText(/\/stats/, (msg) => {
-  const data = loadData();
-  let text = "📊 Статистика:\n";
-
-  for (let u in data.stats) {
-    text += `${u}: ${data.stats[u]} ⭐\n`;
+    bot.sendMessage(data.chatId,
+      `😴 ${name} пропустил\n−1 балл\nНо завтра следующий`);
   }
 
-  bot.sendMessage(msg.chat.id, text);
+  save();
+  bot.answerCallbackQuery(q.id);
 });
 
-
-// ===== расписание =====
-cron.schedule("30 7 * * *", sendMorning);   // 7:30
-cron.schedule("0 21 * * *", sendEvening);   // 21:00
-
-console.log("Family bot started 🚀");
+console.log("🤖 Family bot started");
