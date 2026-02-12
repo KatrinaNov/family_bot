@@ -173,4 +173,16 @@ bot.on("callback_query", (q) => {
   bot.answerCallbackQuery(q.id);
 });
 
-console.log("🤖 Family bot started");
+// ===== Render keep-alive server =====
+const express = require("express");
+const app = express();
+
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+  res.send("Family bot alive 🤖");
+});
+
+app.listen(PORT, () => {
+  console.log("Web server running on port", PORT);
+});
