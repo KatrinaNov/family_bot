@@ -5,7 +5,20 @@ const fs = require("fs");
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
+
 const DATA_FILE = "data.json";
+
+if (!fs.existsSync(DATA_FILE)) {
+    console.log("Создаю новый data.json");
+  
+    fs.writeFileSync(DATA_FILE, JSON.stringify({
+      chatId: null,
+      family: [],
+      dutyIndex: 0,
+      stats: {},
+      doneToday: false
+    }, null, 2));
+  }
 
 // дела
 const TASKS = [
