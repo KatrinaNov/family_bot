@@ -50,7 +50,7 @@ bot.onText(/\/today/, (msg) => {
 /*
   Утренний cron
 */
-cron.schedule("30 7 * * *", () => {
+cron.schedule("30 9 * * *", () => {
   const data = require("./storage").load();
 
   for (let chatId in data.chats) {

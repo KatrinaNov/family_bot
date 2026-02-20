@@ -2,6 +2,12 @@ const fs = require("fs");
 
 const DATA_FILE = "data.json";
 
+if (!fs.existsSync(DATA_FILE)) {
+    fs.writeFileSync(DATA_FILE, JSON.stringify({
+      version: 1,
+      chats: {}
+    }, null, 2));
+  }
 /*
   Загружаем все данные
 */
