@@ -10,7 +10,7 @@ const {
   nextDuty,
   markTaskDone,
   confirmDuty,
-  checkAndCompleteDuty
+  checkAndCompleteDutyWithPoints
 } = require("./duty");
 const { getChat } = require("./storage");
 const config = require("./config");
@@ -27,12 +27,19 @@ bot.onText(/\/start/, (msg) => {
 
 Для помощи по командам используйте:
 /help`);
+
+  // При первом старте создаём дежурство, если его нет
+  const chatId = msg.chat.id;
+  const chat = getChat(chatId);
+  if (!chat.currentDuty) {
+    createDuty(chatId);
+  }
 });
 
 /* /help */
 bot.onText(/\/help/, (msg) => {
   bot.sendMessage(msg.chat.id,
-`📜 Доступные команды:
+`📜 v.4.1.1 Доступные команды:
 /join - присоединиться к семье
 /today - узнать, кто дежурит сегодня
 /stats - показать статистику
@@ -43,11 +50,17 @@ bot.onText(/\/help/, (msg) => {
 /* /join */
 bot.onText(/\/join/, (msg) => {
   const added = addMember(msg.chat.id, msg.from);
-
   if (added) {
     bot.sendMessage(msg.chat.id, `${msg.from.first_name} добавлен в семью 👌`);
   } else {
     bot.sendMessage(msg.chat.id, `Ты уже в семье 😈`);
+  }
+
+  // Если дежурство ещё не создано, создаём сразу
+  const chatId = msg.chat.id;
+  const chat = getChat(chatId);
+  if (!chat.currentDuty) {
+    createDuty(chatId);
   }
 });
 
@@ -58,39 +71,46 @@ bot.onText(/\/today/, (msg) => {
     bot.sendMessage(msg.chat.id, "Нет участников");
     return;
   }
-
   bot.sendMessage(msg.chat.id, `Сегодня дежурит: ${person.name}`);
 });
 
-/* /stats — показать очки, стрик и бейджи */
+/* /stats */
 bot.onText(/\/stats/, (msg) => {
-    const chatId = msg.chat.id;
-    const chat = getChat(chatId);
-    const member = chat.members[msg.from.id];
-    if (!member) {
-      bot.sendMessage(chatId, "Вы не в семье. Используйте /join");
-      return;
-    }
-  
-    let text = `📊 Статистика ${member.name}:\n`;
-    text += `Очки: ${member.stats.points}\n`;
-    text += `Стрик: ${member.stats.streak}\n`;
-    text += `Бейджи: ${member.stats.badges.join(", ") || "нет"}\n`;
-    text += `Стрик-бейджи: ${member.stats.streakBadges.join(", ") || "нет"}`;
-  
-    bot.sendMessage(chatId, text);
-  });
+  const chatId = msg.chat.id;
+  const chat = getChat(chatId);
+  const member = chat.members[msg.from.id];
+  if (!member) {
+    bot.sendMessage(chatId, "Вы не в семье. Используйте /join");
+    return;
+  }
 
-/* /tasks — посмотреть и взаимодействовать с задачами */
+  let text = `📊 Статистика ${member.name}:\n`;
+  text += `Очки: ${member.stats.points}\n`;
+  text += `Стрик: ${member.stats.streak}\n`;
+  text += `Бейджи: ${member.stats.badges?.join(", ") || "нет"}\n`;
+  text += `Стрик-бейджи: ${member.stats.streakBadges?.join(", ") || "нет"}`;
+
+  bot.sendMessage(chatId, text);
+});
+
+/* /tasks */
 bot.onText(/\/tasks/, (msg) => {
-  sendDutyMessage(msg.chat.id);
+  const chatId = msg.chat.id;
+  const chat = getChat(chatId);
+
+  // Если дежурство ещё не создано, создаём его сразу
+  if (!chat.currentDuty) {
+    createDuty(chatId);
+  }
+
+  sendDutyMessage(chatId);
 });
 
 /* Inline кнопки для задач и подтверждений */
 bot.on("callback_query", async (query) => {
   const chatId = query.message.chat.id;
   const userId = query.from.id;
-  const data = query.data.split(":"); // task:1 или confirm или unmark:1
+  const data = query.data.split(":");
 
   const chat = getChat(chatId);
   const duty = chat.currentDuty;
@@ -99,7 +119,6 @@ bot.on("callback_query", async (query) => {
     return;
   }
 
-  // Дежурный отмечает задачу
   if (data[0] === "task") {
     const taskId = parseInt(data[1]);
     const res = markTaskDone(chatId, taskId, userId);
@@ -107,7 +126,6 @@ bot.on("callback_query", async (query) => {
     sendDutyMessage(chatId);
   }
 
-  // Дежурный снимает отметку (если кто-то поставил "не выполнено")
   if (data[0] === "unmark") {
     const taskId = parseInt(data[1]);
     const task = duty.tasks.find(t => t.id === taskId);
@@ -121,11 +139,9 @@ bot.on("callback_query", async (query) => {
     }
   }
 
-  // Другие участники подтверждают или снимают
   if (data[0] === "confirm") {
     const res = confirmDuty(chatId, userId);
     bot.answerCallbackQuery(query.id, { text: res.error || "Подтверждено 👍" });
-    // проверяем завершение
     const completed = checkAndCompleteDutyWithPoints(chatId);
     sendDutyMessage(chatId);
     if (completed) {
@@ -133,7 +149,6 @@ bot.on("callback_query", async (query) => {
     }
   }
 
-  // Другой участник снимает отметку
   if (data[0] === "unconfirm") {
     const index = duty.confirmations.indexOf(userId);
     if (index !== -1) duty.confirmations.splice(index, 1);
@@ -143,11 +158,14 @@ bot.on("callback_query", async (query) => {
   }
 });
 
-/* Отправка сообщения с задачами */
+/* Функция отправки задачи */
 function sendDutyMessage(chatId) {
   const chat = getChat(chatId);
   const duty = chat.currentDuty;
-  if (!duty) return;
+  if (!duty) {
+    bot.sendMessage(chatId, "⚠️ Пока нет активного дежурства");
+    return;
+  }
 
   const person = chat.members[duty.userId];
   if (!person) return;
@@ -160,7 +178,6 @@ function sendDutyMessage(chatId) {
 
   const buttons = [];
 
-  // Дежурный: отметить задачи
   duty.tasks.forEach(t => {
     if (!t.done && duty.userId === person.id) {
       buttons.push([{ text: `✅ ${t.text}`, callback_data: `task:${t.id}` }]);
@@ -170,7 +187,6 @@ function sendDutyMessage(chatId) {
     }
   });
 
-  // Кнопка подтверждения для других участников
   for (const memberId in chat.members) {
     if (parseInt(memberId) !== duty.userId) {
       if (!duty.confirmations.includes(parseInt(memberId))) {
@@ -184,73 +200,10 @@ function sendDutyMessage(chatId) {
   bot.sendMessage(chatId, text, { reply_markup: { inline_keyboard: buttons } });
 }
 
-/* Утренний cron — создаем дежурство и отправляем задачи */
-cron.schedule("30 9 * * *", () => {
-  const data = require("./storage").load();
-  for (let chatId in data.chats) {
-    const duty = createDuty(chatId);
-    if (!duty) continue;
-    sendDutyMessage(chatId);
-  }
-}, { timezone: config.timezone });
-
-/* Вечерний cron — переключаем дежурного */
-cron.schedule("0 21 * * *", () => {
-  const data = require("./storage").load();
-  for (let chatId in data.chats) {
-    nextDuty(chatId);
-    bot.sendMessage(chatId, "🔁 День завершен. Завтра новый герой 😈");
-  }
-}, { timezone: config.timezone });
-
-/* Автоматическое завершение дежурства после 23:00 */
-cron.schedule("0 23 * * *", () => {
-  const data = require("./storage").load();
-  for (let chatId in data.chats) {
-    checkAndCompleteDutyWithPoints(chatId);
-  }
-}, { timezone: config.timezone });
-
-/* Функция для начисления очков и стрика */
-function checkAndCompleteDutyWithPoints(chatId) {
-  const chat = getChat(chatId);
-  const duty = chat.currentDuty;
-  if (!duty || duty.status !== "active") return false;
-
-  const now = new Date();
-  const autoConfirm = now.getHours() >= 12;
-  const confirmations = duty.confirmations.length;
-
-  if (confirmations >= config.minConfirmations || autoConfirm) {
-    duty.status = "completed";
-
-    const member = chat.members[duty.userId];
-    const allDone = duty.tasks.every(t => t.done);
-
-    if (allDone) {
-      member.stats.points += config.points.full;
-      member.stats.streak += 1;
-    } else if (duty.tasks.some(t => t.done)) {
-      member.stats.points += config.points.partial;
-      member.stats.streak = 0;
-    } else {
-      member.stats.points -= config.points.fineNormal;
-      member.stats.streak = 0;
-    }
-
-    chat.history.push(duty);
-    chat.currentDuty = null;
-    nextDuty(chatId);
-    require("./storage").updateChat(chatId, chat);
-    return true;
-  }
-  return false;
-}
-
 /* Keep alive для Render */
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get("/", (req, res) => res.send("Bot alive"));
 app.listen(PORT, () => console.log("Server running"));
 
-console.log("🤖 Family Bot v3 started — с задачами, подтверждениями и очками 🎯");
+console.log("🤖 Family Bot v4 — задачи создаются сразу при старте");
