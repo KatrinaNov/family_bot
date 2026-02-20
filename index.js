@@ -35,6 +35,7 @@ bot.onText(/\/help/, (msg) => {
 `📜 Доступные команды:
 /join - присоединиться к семье
 /today - узнать, кто дежурит сегодня
+/stats - показать статистику
 /tasks - посмотреть и отметить задачи текущего дежурного
 /help - показать это сообщение`);
 });
@@ -60,6 +61,25 @@ bot.onText(/\/today/, (msg) => {
 
   bot.sendMessage(msg.chat.id, `Сегодня дежурит: ${person.name}`);
 });
+
+/* /stats — показать очки, стрик и бейджи */
+bot.onText(/\/stats/, (msg) => {
+    const chatId = msg.chat.id;
+    const chat = getChat(chatId);
+    const member = chat.members[msg.from.id];
+    if (!member) {
+      bot.sendMessage(chatId, "Вы не в семье. Используйте /join");
+      return;
+    }
+  
+    let text = `📊 Статистика ${member.name}:\n`;
+    text += `Очки: ${member.stats.points}\n`;
+    text += `Стрик: ${member.stats.streak}\n`;
+    text += `Бейджи: ${member.stats.badges.join(", ") || "нет"}\n`;
+    text += `Стрик-бейджи: ${member.stats.streakBadges.join(", ") || "нет"}`;
+  
+    bot.sendMessage(chatId, text);
+  });
 
 /* /tasks — посмотреть и взаимодействовать с задачами */
 bot.onText(/\/tasks/, (msg) => {

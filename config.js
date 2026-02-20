@@ -18,5 +18,20 @@ module.exports = {
       fineHardcore: 5
     },
   
-    minConfirmations: 1
+    minConfirmations: 1,
+  
+    badges: [
+      { name: "🟢 Новичок", points: 5 },
+      { name: "🔵 Помощник", points: 10 },
+      { name: "🟣 Опытный", points: 20 },
+      { name: "🟡 Мастер", points: 50 },
+      { name: "🏆 Легенда", points: 100 }
+    ],
+  
+    streakBadges: [
+      { name: "🔥 3 дня подряд", streak: 3 },
+      { name: "💪 7 дней подряд", streak: 7 },
+      { name: "🚀 14 дней подряд", streak: 14 },
+      { name: "🌟 30 дней подряд", streak: 30 }
+    ]
   };

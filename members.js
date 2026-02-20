@@ -1,4 +1,5 @@
 const { getChat, updateChat } = require("./storage");
+const config = require("./config");
 
 /* Добавление участника */
 function addMember(chatId, user) {
@@ -10,8 +11,9 @@ function addMember(chatId, user) {
       role: "member",
       stats: {
         points: 0,
-        fails: 0,
-        streak: 0
+        streak: 0,
+        badges: [],
+        streakBadges: []
       }
     };
     chat.schedule.order.push(user.id);
@@ -27,7 +29,21 @@ function getMember(chatId, userId) {
   return chat.members[userId];
 }
 
+/* Получить бейджи по очкам и стрику */
+function updateBadges(member) {
+  // Очковые бейджи
+  const earned = config.badges.filter(b => member.stats.points >= b.points)
+                              .map(b => b.name);
+  member.stats.badges = earned;
+
+  // Стрик бейджи
+  const streakEarned = config.streakBadges.filter(b => member.stats.streak >= b.streak)
+                                          .map(b => b.name);
+  member.stats.streakBadges = streakEarned;
+}
+
 module.exports = {
   addMember,
-  getMember
+  getMember,
+  updateBadges
 };

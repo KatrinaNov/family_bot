@@ -1,5 +1,6 @@
 const { getChat, updateChat } = require("./storage");
 const config = require("./config");
+const { updateBadges } = require("./members");
 
 /* Определить сегодняшнего дежурного */
 function getTodayPerson(chatId) {
@@ -99,11 +100,52 @@ function nextDuty(chatId) {
   updateChat(chatId, chat);
 }
 
-module.exports = {
-  getTodayPerson,
-  createDuty,
-  nextDuty,
-  markTaskDone,
-  confirmDuty,
-  checkAndCompleteDuty
-};
+/* Функция для начисления очков и стрика с наградами */
+function checkAndCompleteDutyWithPoints(chatId) {
+    const chat = getChat(chatId);
+    const duty = chat.currentDuty;
+    if (!duty || duty.status !== "active") return false;
+  
+    const now = new Date();
+    const autoConfirm = now.getHours() >= 12;
+    const confirmations = duty.confirmations.length;
+  
+    if (confirmations >= config.minConfirmations || autoConfirm) {
+      duty.status = "completed";
+  
+      const member = chat.members[duty.userId];
+      const allDone = duty.tasks.every(t => t.done);
+  
+      if (allDone) {
+        member.stats.points += config.points.full;
+        member.stats.streak += 1;
+      } else if (duty.tasks.some(t => t.done)) {
+        member.stats.points += config.points.partial;
+        member.stats.streak = 0;
+      } else {
+        member.stats.points -= config.points.fineNormal;
+        if (member.stats.points < 0) member.stats.points = 0;
+        member.stats.streak = 0;
+      }
+  
+      // Обновляем бейджи
+      updateBadges(member);
+  
+      chat.history.push(duty);
+      chat.currentDuty = null;
+      nextDuty(chatId);
+      updateChat(chatId, chat);
+      return true;
+    }
+    return false;
+  }
+  
+  module.exports = {
+    getTodayPerson,
+    createDuty,
+    nextDuty,
+    markTaskDone,
+    confirmDuty,
+    checkAndCompleteDuty,
+    checkAndCompleteDutyWithPoints
+  };
