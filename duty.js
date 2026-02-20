@@ -27,9 +27,11 @@ function createDuty(chatId) {
     userId: person.id,
     status: "active",
     tasks: config.defaultTasks.map((t, i) => ({
-      id: i + 1,
-      text: t,
-      done: false
+        id: i + 1,
+        text: t.text,
+        type: t.type || "daily",
+        done: false,
+        assignedTo: person.id
     })),
     confirmations: []
   };
