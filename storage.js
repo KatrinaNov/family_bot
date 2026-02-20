@@ -1,18 +1,35 @@
 const fs = require("fs");
+const path = require("path");
 
-const DATA_FILE = "data.json";
+const DATA_FILE = path.join(__dirname, "data.json");
 
-if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({
+/*
+  Инициализация файла, если его нет
+*/
+function initFile() {
+  if (!fs.existsSync(DATA_FILE)) {
+    const initialData = {
       version: 1,
       chats: {}
-    }, null, 2));
+    };
+    fs.writeFileSync(DATA_FILE, JSON.stringify(initialData, null, 2));
   }
+}
+
 /*
-  Загружаем все данные
+  Загружаем все данные (если файла нет, создаем)
 */
 function load() {
-  return JSON.parse(fs.readFileSync(DATA_FILE));
+  try {
+    return JSON.parse(fs.readFileSync(DATA_FILE));
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      initFile();
+      return load();
+    } else {
+      throw err;
+    }
+  }
 }
 
 /*
@@ -58,6 +75,8 @@ function updateChat(chatId, chatData) {
   data.chats[chatId] = chatData;
   save(data);
 }
+
+initFile(); // гарантируем наличие файла при старте
 
 module.exports = {
   load,
