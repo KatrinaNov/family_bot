@@ -1,11 +1,8 @@
 const { getChat, updateChat } = require("./storage");
 
-/*
-  Добавление участника
-*/
+/* Добавление участника */
 function addMember(chatId, user) {
   const chat = getChat(chatId);
-
   if (!chat.members[user.id]) {
     chat.members[user.id] = {
       id: user.id,
@@ -17,19 +14,14 @@ function addMember(chatId, user) {
         streak: 0
       }
     };
-
     chat.schedule.order.push(user.id);
     updateChat(chatId, chat);
-
     return true;
   }
-
   return false;
 }
 
-/*
-  Получить участника
-*/
+/* Получить участника */
 function getMember(chatId, userId) {
   const chat = getChat(chatId);
   return chat.members[userId];
