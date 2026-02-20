@@ -59,6 +59,22 @@ function markTaskDone(chatId, taskId, userId) {
   return { success: true, task };
 }
 
+/* Снять отметку задачи (дежурный) */
+function unmarkTask(chatId, taskId, userId) {
+  const chat = getChat(chatId);
+  const duty = chat.currentDuty;
+  if (!duty || duty.status !== "active") return { error: "Нет активного дежурства" };
+
+  if (duty.userId !== userId) return { error: "Снять отметку может только дежурный" };
+
+  const task = duty.tasks.find(t => t.id === taskId);
+  if (!task) return { error: "Задача не найдена" };
+
+  task.done = false;
+  updateChat(chatId, chat);
+  return { success: true, task };
+}
+
 /* Подтверждение выполнения от другого участника */
 function confirmDuty(chatId, userId) {
   const chat = getChat(chatId);
@@ -67,6 +83,19 @@ function confirmDuty(chatId, userId) {
 
   if (userId === duty.userId) return { error: "Дежурный не может подтверждать сам себя" };
   if (!duty.confirmations.includes(userId)) duty.confirmations.push(userId);
+
+  updateChat(chatId, chat);
+  return { success: true };
+}
+
+/* Снять подтверждение */
+function unconfirmDuty(chatId, userId) {
+  const chat = getChat(chatId);
+  const duty = chat.currentDuty;
+  if (!duty || duty.status !== "active") return { error: "Нет активного дежурства" };
+
+  const index = duty.confirmations.indexOf(userId);
+  if (index !== -1) duty.confirmations.splice(index, 1);
 
   updateChat(chatId, chat);
   return { success: true };
@@ -84,7 +113,6 @@ function checkAndCompleteDuty(chatId) {
 
   if (confirmations >= config.minConfirmations || autoConfirm) {
     duty.status = "completed";
-    // можно начислять очки, обновлять стрик здесь
     chat.history.push(duty);
     chat.currentDuty = null;
     nextDuty(chatId);
@@ -100,52 +128,54 @@ function nextDuty(chatId) {
   updateChat(chatId, chat);
 }
 
-/* Функция для начисления очков и стрика с наградами */
+/* Начисление очков и обновление стрика с бейджами */
 function checkAndCompleteDutyWithPoints(chatId) {
-    const chat = getChat(chatId);
-    const duty = chat.currentDuty;
-    if (!duty || duty.status !== "active") return false;
-  
-    const now = new Date();
-    const autoConfirm = now.getHours() >= 12;
-    const confirmations = duty.confirmations.length;
-  
-    if (confirmations >= config.minConfirmations || autoConfirm) {
-      duty.status = "completed";
-  
-      const member = chat.members[duty.userId];
-      const allDone = duty.tasks.every(t => t.done);
-  
-      if (allDone) {
-        member.stats.points += config.points.full;
-        member.stats.streak += 1;
-      } else if (duty.tasks.some(t => t.done)) {
-        member.stats.points += config.points.partial;
-        member.stats.streak = 0;
-      } else {
-        member.stats.points -= config.points.fineNormal;
-        if (member.stats.points < 0) member.stats.points = 0;
-        member.stats.streak = 0;
-      }
-  
-      // Обновляем бейджи
-      updateBadges(member);
-  
-      chat.history.push(duty);
-      chat.currentDuty = null;
-      nextDuty(chatId);
-      updateChat(chatId, chat);
-      return true;
+  const chat = getChat(chatId);
+  const duty = chat.currentDuty;
+  if (!duty || duty.status !== "active") return false;
+
+  const now = new Date();
+  const autoConfirm = now.getHours() >= 12;
+  const confirmations = duty.confirmations.length;
+
+  if (confirmations >= config.minConfirmations || autoConfirm) {
+    duty.status = "completed";
+
+    const member = chat.members[duty.userId];
+    const allDone = duty.tasks.every(t => t.done);
+
+    if (allDone) {
+      member.stats.points += config.points.full;
+      member.stats.streak += 1;
+    } else if (duty.tasks.some(t => t.done)) {
+      member.stats.points += config.points.partial;
+      member.stats.streak = 0;
+    } else {
+      member.stats.points -= config.points.fineNormal;
+      if (member.stats.points < 0) member.stats.points = 0;
+      member.stats.streak = 0;
     }
-    return false;
+
+    updateBadges(member);
+
+    chat.history.push(duty);
+    chat.currentDuty = null;
+    nextDuty(chatId);
+    updateChat(chatId, chat);
+    return true;
   }
-  
-  module.exports = {
-    getTodayPerson,
-    createDuty,
-    nextDuty,
-    markTaskDone,
-    confirmDuty,
-    checkAndCompleteDuty,
-    checkAndCompleteDutyWithPoints
-  };
+
+  return false;
+}
+
+module.exports = {
+  getTodayPerson,
+  createDuty,
+  nextDuty,
+  markTaskDone,
+  unmarkTask,
+  confirmDuty,
+  unconfirmDuty,
+  checkAndCompleteDuty,
+  checkAndCompleteDutyWithPoints
+};
