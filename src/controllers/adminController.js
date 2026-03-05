@@ -1,6 +1,6 @@
 /**
  * Админ-панель: добавление/редактирование/удаление задач, смена дежурного.
- * Доступ только для adminIds в настройках чата.
+ * Доступ только для единственного админа (settings.adminId) в настройках чата.
  */
 const taskService = require("../services/taskService");
 const dutyService = require("../services/dutyService");
@@ -171,11 +171,12 @@ async function handleAdminNextDuty(bot, query) {
   }
 }
 
-/** Добавить текущего пользователя в админы (по команде /setadmin или кнопке в админке) */
+/** Назначить текущего пользователя единственным админом. Возвращает true | "already" | false (не в семье). */
 async function handleSetAdmin(bot, chatId, userId) {
   const member = memberService.getMember(chatId, userId);
   if (!member) return false;
-  return memberService.addAdmin(chatId, userId);
+  const wasSet = memberService.setAdmin(chatId, userId);
+  return wasSet ? true : "already";
 }
 
 module.exports = {

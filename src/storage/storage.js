@@ -52,14 +52,19 @@ function getChat(chatId) {
       currentDuty: null,
       history: [],
       tasks: [],
-      settings: { adminIds: [], minConfirmations: 1, timezone: "Europe/Minsk" },
+      settings: { adminId: null, minConfirmations: 1, timezone: "Europe/Minsk" },
     };
     save(data);
   }
   const chat = data.chats[key];
   if (!Array.isArray(chat.tasks)) chat.tasks = [];
   if (!chat.settings) chat.settings = {};
-  if (!Array.isArray(chat.settings.adminIds)) chat.settings.adminIds = [];
+  // Миграция: старый adminIds → один adminId (берём первого)
+  if (Array.isArray(chat.settings.adminIds) && chat.settings.adminIds.length > 0) {
+    chat.settings.adminId = chat.settings.adminIds[0];
+    chat.settings.adminIds = undefined;
+  }
+  if (chat.settings.adminId === undefined) chat.settings.adminId = null;
   return chat;
 }
 

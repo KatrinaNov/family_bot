@@ -94,8 +94,7 @@ function confirmDutyByAdmin(chatId, adminUserId) {
   if (!duty || duty.status !== "pending_confirmation") {
     return { ok: false, error: "Нет дежурства, ожидающего подтверждения" };
   }
-  const adminIds = chat.settings?.adminIds || [];
-  if (!adminIds.includes(adminUserId)) {
+  if (chat.settings?.adminId !== adminUserId) {
     return { ok: false, error: "Только админ может подтвердить" };
   }
 
@@ -127,8 +126,7 @@ function rejectDutyByAdmin(chatId, adminUserId) {
   if (!duty || duty.status !== "pending_confirmation") {
     return { ok: false, error: "Нет дежурства, ожидающего подтверждения" };
   }
-  const adminIds = chat.settings?.adminIds || [];
-  if (!adminIds.includes(adminUserId)) {
+  if (chat.settings?.adminId !== adminUserId) {
     return { ok: false, error: "Только админ может отклонить" };
   }
 

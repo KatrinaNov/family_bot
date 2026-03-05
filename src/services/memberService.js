@@ -47,19 +47,24 @@ function updateBadges(member) {
   member.stats.streakBadges = streakEarned;
 }
 
-/** Добавить админа по userId */
-function addAdmin(chatId, userId) {
+/** Назначить единственного админа по userId (заменяет предыдущего) */
+function setAdmin(chatId, userId) {
   const chat = getChat(chatId);
-  if (!chat.settings.adminIds) chat.settings.adminIds = [];
-  if (chat.settings.adminIds.includes(userId)) return false;
-  chat.settings.adminIds.push(userId);
+  if (chat.settings.adminId === userId) return false;
+  chat.settings.adminId = userId;
   updateChat(chatId, chat);
   return true;
 }
 
 function isAdmin(chatId, userId) {
   const chat = getChat(chatId);
-  return (chat.settings.adminIds || []).includes(userId);
+  return chat.settings.adminId === userId;
+}
+
+/** Получить id текущего админа (или null) */
+function getAdminId(chatId) {
+  const chat = getChat(chatId);
+  return chat.settings.adminId ?? null;
 }
 
 module.exports = {
@@ -67,6 +72,7 @@ module.exports = {
   getMember,
   getAllMembers,
   updateBadges,
-  addAdmin,
+  setAdmin,
   isAdmin,
+  getAdminId,
 };

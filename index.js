@@ -63,11 +63,13 @@ bot.onText(/\/setadmin/, async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
   const adminController = require("./src/controllers/adminController");
-  const added = await adminController.handleSetAdmin(bot, chatId, userId);
-  if (added) {
-    await bot.sendMessage(chatId, "Вы назначены админом.");
+  const result = await adminController.handleSetAdmin(bot, chatId, userId);
+  if (result === true) {
+    await bot.sendMessage(chatId, "Вы назначены единственным админом этого чата.");
+  } else if (result === "already") {
+    await bot.sendMessage(chatId, "Вы уже админ.");
   } else {
-    await bot.sendMessage(chatId, "Сначала напишите /join. Или вы уже админ.");
+    await bot.sendMessage(chatId, "Сначала напишите /join, чтобы войти в семью.");
   }
 });
 

@@ -22,7 +22,7 @@ async function handleDutyDone(bot, query) {
   const chat = getChat(chatId);
   const duty = chat.currentDuty;
   const member = chat.members[duty.userId];
-  const adminIds = chat.settings?.adminIds || [];
+  const adminId = chat.settings?.adminId;
 
   const text = `Дежурный ${member?.name || "?"} отметил задачи как выполненные.\nПодтвердить?`;
   const keyboard = {
@@ -32,8 +32,8 @@ async function handleDutyDone(bot, query) {
     ],
   };
 
-  if (adminIds.length === 0) {
-    await bot.sendMessage(chatId, "Нет назначенных админов. Назначьте админа: /setadmin");
+  if (adminId == null) {
+    await bot.sendMessage(chatId, "Админ не назначен. Назначьте админа: /setadmin");
     return;
   }
   try {
