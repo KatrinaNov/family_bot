@@ -1,209 +1,155 @@
+/**
+ * Точка входа: один экземпляр бота, polling с drop_pending_updates для избежания 409.
+ * Чистая архитектура: controllers / services / storage.
+ */
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
-const cron = require("node-cron");
 const express = require("express");
 
-const { addMember } = require("./members");
-const {
-  getTodayPerson,
-  createDuty,
-  nextDuty,
-  markTaskDone,
-  confirmDuty,
-  checkAndCompleteDutyWithPoints
-} = require("./duty");
-const { getChat } = require("./storage");
-const config = require("./config");
+const logger = require("./src/lib/logger");
+const { getChat } = require("./src/storage/storage");
+const dutyService = require("./src/services/dutyService");
+const taskService = require("./src/services/taskService");
+const memberService = require("./src/services/memberService");
+const menuController = require("./src/controllers/menuController");
+const callbackRouter = require("./src/controllers/callbackRouter");
+const cronJobs = require("./src/scheduler/cronJobs");
 
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+// Один экземпляр бота. Запускайте только один процесс — иначе возможен конфликт 409 (terminated by other getUpdates).
+const bot = new TelegramBot(process.env.BOT_TOKEN, {
+  polling: {
+    interval: 500,
+    params: { timeout: 30 },
+  },
+});
 
-/* /start */
-bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id,
-`🏠 Семейный бот активирован
+// —— Команды ——
 
-Каждый участник должен написать:
-/join
+bot.onText(/\/start/, async (msg) => {
+  try {
+    await menuController.handleStart(bot, msg);
+  } catch (e) {
+    logger.error("/start", e);
+    await bot.sendMessage(msg.chat.id, "Произошла ошибка.");
+  }
+});
 
-Для помощи по командам используйте:
-/help`);
+bot.onText(/\/help/, async (msg) => {
+  try {
+    await menuController.handleHelp(bot, msg);
+  } catch (e) {
+    logger.error("/help", e);
+  }
+});
 
-  // При первом старте создаём дежурство, если его нет
+bot.onText(/\/join/, async (msg) => {
   const chatId = msg.chat.id;
-  const chat = getChat(chatId);
-  if (!chat.currentDuty) {
-    createDuty(chatId);
-  }
-});
-
-/* /help */
-bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id,
-`📜 v.4.1.1 Доступные команды:
-/join - присоединиться к семье
-/today - узнать, кто дежурит сегодня
-/stats - показать статистику
-/tasks - посмотреть и отметить задачи текущего дежурного
-/help - показать это сообщение`);
-});
-
-/* /join */
-bot.onText(/\/join/, (msg) => {
-  const added = addMember(msg.chat.id, msg.from);
-  if (added) {
-    bot.sendMessage(msg.chat.id, `${msg.from.first_name} добавлен в семью 👌`);
-  } else {
-    bot.sendMessage(msg.chat.id, `Ты уже в семье 😈`);
-  }
-
-  // Если дежурство ещё не создано, создаём сразу
-  const chatId = msg.chat.id;
-  const chat = getChat(chatId);
-  if (!chat.currentDuty) {
-    createDuty(chatId);
-  }
-});
-
-/* /today */
-bot.onText(/\/today/, (msg) => {
-  const person = getTodayPerson(msg.chat.id);
-  if (!person) {
-    bot.sendMessage(msg.chat.id, "Нет участников");
-    return;
-  }
-  bot.sendMessage(msg.chat.id, `Сегодня дежурит: ${person.name}`);
-});
-
-/* /stats */
-bot.onText(/\/stats/, (msg) => {
-  const chatId = msg.chat.id;
-  const chat = getChat(chatId);
-  const member = chat.members[msg.from.id];
-  if (!member) {
-    bot.sendMessage(chatId, "Вы не в семье. Используйте /join");
-    return;
-  }
-
-  let text = `📊 Статистика ${member.name}:\n`;
-  text += `Очки: ${member.stats.points}\n`;
-  text += `Стрик: ${member.stats.streak}\n`;
-  text += `Бейджи: ${member.stats.badges?.join(", ") || "нет"}\n`;
-  text += `Стрик-бейджи: ${member.stats.streakBadges?.join(", ") || "нет"}`;
-
-  bot.sendMessage(chatId, text);
-});
-
-/* /tasks */
-bot.onText(/\/tasks/, (msg) => {
-  const chatId = msg.chat.id;
-  const chat = getChat(chatId);
-
-  // Если дежурство ещё не создано, создаём его сразу
-  if (!chat.currentDuty) {
-    createDuty(chatId);
-  }
-
-  sendDutyMessage(chatId);
-});
-
-/* Inline кнопки для задач и подтверждений */
-bot.on("callback_query", async (query) => {
-  const chatId = query.message.chat.id;
-  const userId = query.from.id;
-  const data = query.data.split(":");
-
-  const chat = getChat(chatId);
-  const duty = chat.currentDuty;
-  if (!duty) {
-    bot.answerCallbackQuery(query.id, { text: "Нет активного дежурства", show_alert: true });
-    return;
-  }
-
-  if (data[0] === "task") {
-    const taskId = parseInt(data[1]);
-    const res = markTaskDone(chatId, taskId, userId);
-    bot.answerCallbackQuery(query.id, { text: res.error || "Задача отмечена ✅" });
-    sendDutyMessage(chatId);
-  }
-
-  if (data[0] === "unmark") {
-    const taskId = parseInt(data[1]);
-    const task = duty.tasks.find(t => t.id === taskId);
-    if (task && duty.userId === userId) {
-      task.done = false;
-      require("./storage").updateChat(chatId, chat);
-      bot.answerCallbackQuery(query.id, { text: "Отметка снята ⬜️" });
-      sendDutyMessage(chatId);
+  try {
+    const added = memberService.addMember(chatId, msg.from);
+    if (added) {
+      await bot.sendMessage(chatId, `${msg.from.first_name || msg.from.username} добавлен в семью 👌`);
     } else {
-      bot.answerCallbackQuery(query.id, { text: "Не получилось снять отметку", show_alert: true });
+      await bot.sendMessage(chatId, "Ты уже в семье 😊");
     }
-  }
-
-  if (data[0] === "confirm") {
-    const res = confirmDuty(chatId, userId);
-    bot.answerCallbackQuery(query.id, { text: res.error || "Подтверждено 👍" });
-    const completed = checkAndCompleteDutyWithPoints(chatId);
-    sendDutyMessage(chatId);
-    if (completed) {
-      bot.sendMessage(chatId, `🎉 Дежурство завершено! ${getTodayPerson(chatId)?.name || "Новый герой"} получил очки!`);
-    }
-  }
-
-  if (data[0] === "unconfirm") {
-    const index = duty.confirmations.indexOf(userId);
-    if (index !== -1) duty.confirmations.splice(index, 1);
-    require("./storage").updateChat(chatId, chat);
-    bot.answerCallbackQuery(query.id, { text: "Подтверждение снято 👎" });
-    sendDutyMessage(chatId);
+    if (!getChat(chatId).schedule?.order?.length) return;
+    dutyService.ensureDutyForToday(chatId);
+  } catch (e) {
+    logger.error("/join", e);
+    await bot.sendMessage(chatId, "Ошибка при добавлении.");
   }
 });
 
-/* Функция отправки задачи */
-function sendDutyMessage(chatId) {
-  const chat = getChat(chatId);
-  const duty = chat.currentDuty;
-  if (!duty) {
-    bot.sendMessage(chatId, "⚠️ Пока нет активного дежурства");
+bot.onText(/\/setadmin/, async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const adminController = require("./src/controllers/adminController");
+  const added = await adminController.handleSetAdmin(bot, chatId, userId);
+  if (added) {
+    await bot.sendMessage(chatId, "Вы назначены админом.");
+  } else {
+    await bot.sendMessage(chatId, "Сначала напишите /join. Или вы уже админ.");
+  }
+});
+
+bot.onText(/\/today/, async (msg) => {
+  const chatId = msg.chat.id;
+  const person = dutyService.getTodayPerson(chatId);
+  if (!person) {
+    await bot.sendMessage(chatId, "Нет участников. Напишите /join");
     return;
   }
+  await bot.sendMessage(chatId, `Сегодня дежурный: ${person.name}`);
+});
 
-  const person = chat.members[duty.userId];
-  if (!person) return;
-
-  let text = `☀️ Сегодня дежурит: ${person.name}\n\n`;
-  duty.tasks.forEach(t => {
-    text += `• ${t.done ? "✅" : "⬜️"} ${t.text}\n`;
-  });
-  text += `\nПодтверждения семьи: ${duty.confirmations.length}`;
-
-  const buttons = [];
-
-  duty.tasks.forEach(t => {
-    if (!t.done && duty.userId === person.id) {
-      buttons.push([{ text: `✅ ${t.text}`, callback_data: `task:${t.id}` }]);
-    }
-    if (t.done && duty.userId === person.id) {
-      buttons.push([{ text: `⬜️ ${t.text} (снять)`, callback_data: `unmark:${t.id}` }]);
-    }
-  });
-
-  for (const memberId in chat.members) {
-    if (parseInt(memberId) !== duty.userId) {
-      if (!duty.confirmations.includes(parseInt(memberId))) {
-        buttons.push([{ text: `👍 Подтверждаю (${chat.members[memberId].name})`, callback_data: "confirm" }]);
-      } else {
-        buttons.push([{ text: `👎 Снять подтверждение (${chat.members[memberId].name})`, callback_data: "unconfirm" }]);
-      }
-    }
+bot.onText(/\/tasks/, async (msg) => {
+  const chatId = msg.chat.id;
+  dutyService.ensureDutyForToday(chatId);
+  const today = dutyService.getTodayDateStr();
+  const person = dutyService.getTodayPerson(chatId);
+  const tasks = taskService.getTasksForDate(chatId, today);
+  if (!person) {
+    await bot.sendMessage(chatId, "Нет участников.");
+    return;
   }
+  let text = `📋 Сегодня дежурный: ${person.name}\n\nЗадачи:\n\n`;
+  tasks.forEach((t) => (text += `• ${t.title}\n`));
+  const chat = getChat(chatId);
+  const duty = chat.currentDuty;
+  const canMarkDone = duty && duty.status === "active" && duty.userId === msg.from.id;
+  const keyboard = {
+    inline_keyboard: canMarkDone
+      ? [[{ text: "✅ Задачи выполнены", callback_data: "duty:done" }]]
+      : [],
+  };
+  await bot.sendMessage(chatId, text, { reply_markup: keyboard });
+});
 
-  bot.sendMessage(chatId, text, { reply_markup: { inline_keyboard: buttons } });
-}
+bot.onText(/\/stats/, async (msg) => {
+  const chatId = msg.chat.id;
+  const ratingService = require("./src/services/ratingService");
+  const stats = ratingService.getMemberStats(chatId, msg.from.id);
+  if (!stats) {
+    await bot.sendMessage(chatId, "Вы не в семье. /join");
+    return;
+  }
+  let text = `📊 Статистика: ${stats.name}\n\n`;
+  text += `Очки: ${stats.points}\nСтрик: ${stats.streak}\n`;
+  text += `Был дежурным: ${stats.dutyCount}\nПодтверждено: ${stats.confirmedCount}\n`;
+  text += `Отклонено: ${stats.rejectedCount}\nАвто-подтверждений: ${stats.autoConfirmedCount}\n`;
+  text += `Бейджи: ${(stats.badges || []).join(", ") || "нет"}`;
+  await bot.sendMessage(chatId, text);
+});
 
-/* Keep alive для Render */
+// —— Callback query (одна точка входа, idempotent) ——
+
+bot.on("callback_query", async (query) => {
+  await callbackRouter.route(bot, query);
+});
+
+// —— Ошибки и перезапуск ——
+
+bot.on("polling_error", (err) => {
+  logger.error("Polling error", err.message);
+  if (err.code === 409) {
+    logger.warn("409: другой экземпляр getUpdates. Убедитесь, что запущен только один процесс.");
+  }
+});
+
+process.on("uncaughtException", (err) => {
+  logger.error("Uncaught exception", err);
+});
+process.on("unhandledRejection", (err) => {
+  logger.error("Unhandled rejection", err);
+});
+
+// —— Cron и HTTP keep-alive ——
+
+cronJobs.setBot(bot);
+cronJobs.start();
+
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get("/", (req, res) => res.send("Bot alive"));
-app.listen(PORT, () => console.log("Server running"));
+app.get("/", (_, res) => res.send("Family Bot alive"));
+app.listen(PORT, () => logger.info("HTTP server", PORT));
 
-console.log("🤖 Family Bot v4 — задачи создаются сразу при старте");
+logger.info("Family Bot started");
