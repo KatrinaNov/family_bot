@@ -35,7 +35,18 @@ function save(data) {
   const tempFile = DATA_FILE + ".tmp." + process.pid;
   try {
     fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), "utf8");
-    fs.renameSync(tempFile, DATA_FILE);
+    // На Windows rename поверх существующего файла может падать.
+    // Делаем best-effort атомарную замену с fallback на copyFile.
+    try {
+      fs.renameSync(tempFile, DATA_FILE);
+    } catch (err) {
+      try {
+        fs.copyFileSync(tempFile, DATA_FILE);
+      } catch (copyErr) {
+        logger.error("Storage save error (rename/copy)", { err, copyErr });
+        throw copyErr;
+      }
+    }
   } finally {
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
   }
@@ -45,6 +56,7 @@ function save(data) {
 function getChat(chatId) {
   const data = load();
   const key = String(chatId);
+  let dirty = false;
   if (!data.chats[key]) {
     data.chats[key] = {
       members: {},
@@ -54,17 +66,29 @@ function getChat(chatId) {
       tasks: [],
       settings: { adminId: null, minConfirmations: 1, timezone: "Europe/Minsk" },
     };
-    save(data);
+    dirty = true;
   }
   const chat = data.chats[key];
-  if (!Array.isArray(chat.tasks)) chat.tasks = [];
-  if (!chat.settings) chat.settings = {};
+  if (!Array.isArray(chat.tasks)) {
+    chat.tasks = [];
+    dirty = true;
+  }
+  if (!chat.settings) {
+    chat.settings = {};
+    dirty = true;
+  }
   // Миграция: старый adminIds → один adminId (берём первого)
   if (Array.isArray(chat.settings.adminIds) && chat.settings.adminIds.length > 0) {
     chat.settings.adminId = chat.settings.adminIds[0];
     chat.settings.adminIds = undefined;
+    dirty = true;
   }
-  if (chat.settings.adminId === undefined) chat.settings.adminId = null;
+  if (chat.settings.adminId === undefined) {
+    chat.settings.adminId = null;
+    dirty = true;
+  }
+
+  if (dirty) save(data);
   return chat;
 }
 

@@ -44,4 +44,6 @@ module.exports = {
   cronMorning: "0 9 * * *",
   /** Cron: авто-подтверждение в 23:00 */
   cronAutoConfirm: "0 23 * * *",
+  /** Cron: вечернее напоминание (20:00) если задания не отмечены */
+  cronEveningReminder: "0 20 * * *",
 };

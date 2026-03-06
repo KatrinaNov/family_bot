@@ -36,6 +36,7 @@ function getMemberStats(chatId, userId) {
     confirmedCount: s.confirmedCount ?? 0,
     rejectedCount: s.rejectedCount ?? 0,
     autoConfirmedCount: s.autoConfirmedCount ?? 0,
+    missedCount: s.missedCount ?? 0,
   };
 }
 

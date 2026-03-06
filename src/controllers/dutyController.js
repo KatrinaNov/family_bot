@@ -6,6 +6,8 @@ const { getChat } = require("../storage/storage");
 const dutyService = require("../services/dutyService");
 const memberService = require("../services/memberService");
 const logger = require("../lib/logger");
+const ui = require("../ui/ui");
+const config = require("../../config");
 
 /** Обработка duty:done — дежурный нажал "Задачи выполнены" */
 async function handleDutyDone(bot, query) {
@@ -24,7 +26,10 @@ async function handleDutyDone(bot, query) {
   const member = chat.members[duty.userId];
   const adminId = chat.settings?.adminId;
 
-  const text = `Дежурный ${member?.name || "?"} отметил задачи как выполненные.\nПодтвердить?`;
+  const text =
+    `<b>Подтверждение дежурства</b>\n\n` +
+    `Дежурный <b>${ui.escapeHtml(member?.name || "?")}</b> отметил задачи как выполненные.\n` +
+    `Подтвердить?`;
   const keyboard = {
     inline_keyboard: [
       [{ text: "✅ Подтвердить", callback_data: "duty:confirm" }],
@@ -37,7 +42,7 @@ async function handleDutyDone(bot, query) {
     return;
   }
   try {
-    const msg = await bot.sendMessage(chatId, text, { reply_markup: keyboard });
+    const msg = await bot.sendMessage(chatId, text, { parse_mode: "HTML", reply_markup: keyboard });
     dutyService.setAdminMessageId(chatId, msg.message_id);
   } catch (e) {
     logger.warn("Could not send admin confirmation to chat", chatId, e);
@@ -57,7 +62,15 @@ async function handleDutyConfirm(bot, query) {
   try {
     await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: query.message.message_id });
   } catch (_) {}
-  await bot.sendMessage(chatId, `${res.member?.name || "Дежурный"}, задачи подтверждены 👍 Баллы начислены.`);
+  await bot.sendMessage(
+    chatId,
+    ui.confirmedCard({ name: res.member?.name || "Дежурный", points: config.points.perDuty, mode: "admin" }),
+    { parse_mode: "HTML", reply_markup: ui.replyMenuKeyboard() }
+  );
+  const tomorrow = dutyService.getTomorrowPerson(chatId);
+  if (tomorrow) {
+    await bot.sendMessage(chatId, ui.tomorrowCard({ personName: tomorrow.name }), { parse_mode: "HTML" });
+  }
 }
 
 /** Админ нажал "Отклонить" */
@@ -76,7 +89,11 @@ async function handleDutyReject(bot, query) {
       message_id: query.message.message_id,
     });
   } catch (_) {}
-  await bot.sendMessage(chatId, "Задачи отклонены ❗ Нужно выполнить снова. Кнопка «Задачи выполнены» снова активна для дежурного.");
+  await bot.sendMessage(
+    chatId,
+    "<b>❌ Отклонено</b>\n\nЗадачи отклонены. Нужно выполнить снова.\nКнопка «✅ Задачи выполнены» снова активна для дежурного.",
+    { parse_mode: "HTML", reply_markup: ui.replyMenuKeyboard() }
+  );
 }
 
 module.exports = {

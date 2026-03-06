@@ -22,6 +22,7 @@ function addMember(chatId, user) {
       confirmedCount: 0,
       rejectedCount: 0,
       autoConfirmedCount: 0,
+      missedCount: 0,
     },
   };
   if (!chat.schedule.order.includes(id)) chat.schedule.order.push(id);

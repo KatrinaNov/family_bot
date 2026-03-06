@@ -21,6 +21,15 @@ function getTodayPerson(chatId) {
   return chat.members[order[idx]] || null;
 }
 
+/** Кто будет дежурным завтра (по кругу), не меняя состояние */
+function getTomorrowPerson(chatId) {
+  const chat = getChat(chatId);
+  const order = chat.schedule?.order || [];
+  if (order.length === 0) return null;
+  const idx = ((chat.schedule.currentIndex || 0) + 1) % order.length;
+  return chat.members[order[idx]] || null;
+}
+
 /**
  * Создать дежурство на сегодня, если его ещё нет.
  * Возвращает currentDuty или null.
@@ -31,14 +40,37 @@ function ensureDutyForToday(chatId) {
   // Миграция: старый формат с duty.tasks вместо duty.taskIds — пересоздаём
   if (chat.currentDuty && chat.currentDuty.date === today) {
     if (chat.currentDuty.status === "pending_confirmation") return chat.currentDuty;
+    if (chat.currentDuty.status === "confirmed") return chat.currentDuty;
     if (chat.currentDuty.status === "active" && Array.isArray(chat.currentDuty.taskIds)) return chat.currentDuty;
   }
   // Если дежурство на другой день или уже завершено — переключаем и создаём новое
   if (chat.currentDuty && chat.currentDuty.date !== today) {
-    if (chat.currentDuty.status === "active" || chat.currentDuty.status === "pending_confirmation") {
-      chat.history = chat.history || [];
-      chat.history.push(chat.currentDuty);
+    const prev = chat.currentDuty;
+    const member = chat.members?.[prev.userId];
+
+    // Надёжность после перезапуска: если вчера был pending_confirmation и мы не успели сделать авто-подтверждение,
+    // считаем выполненным автоматически при первом запуске на следующий день.
+    if (prev.status === "pending_confirmation" && member) {
+      prev.status = "confirmed";
+      prev.resolvedBy = "auto_rollover";
+      const points = config.points.perDuty;
+      member.stats.points += points;
+      member.stats.streak = (member.stats.streak || 0) + 1;
+      member.stats.dutyCount = (member.stats.dutyCount || 0) + 1;
+      member.stats.autoConfirmedCount = (member.stats.autoConfirmedCount || 0) + 1;
+      updateBadges(member);
+      markTasksCompletedOn(chatId, prev.date, prev.taskIds || []);
     }
+
+    // Если вчерашнее дежурство так и не было отмечено (active) — считаем пропущенным, сбрасываем стрик.
+    if (prev.status === "active" && member) {
+      member.stats.streak = 0;
+      member.stats.missedCount = (member.stats.missedCount || 0) + 1;
+      updateBadges(member);
+    }
+
+    chat.history = chat.history || [];
+    chat.history.push(prev);
     chat.currentDuty = null;
     chat.schedule.currentIndex = (chat.schedule.currentIndex || 0) + 1;
   }
@@ -99,6 +131,8 @@ function confirmDutyByAdmin(chatId, adminUserId) {
   }
 
   duty.status = "confirmed";
+  duty.confirmedAt = new Date().toISOString();
+  duty.resolvedBy = "admin";
   const member = chat.members[duty.userId];
   const points = config.points.perDuty;
   member.stats.points += points;
@@ -108,11 +142,6 @@ function confirmDutyByAdmin(chatId, adminUserId) {
   updateBadges(member);
 
   markTasksCompletedOn(chatId, duty.date, duty.taskIds);
-
-  chat.history = chat.history || [];
-  chat.history.push({ ...duty, resolvedBy: "admin" });
-  chat.currentDuty = null;
-  chat.schedule.currentIndex = (chat.schedule.currentIndex || 0) + 1;
   updateChat(chatId, chat);
   return { ok: true, member, points };
 }
@@ -132,6 +161,7 @@ function rejectDutyByAdmin(chatId, adminUserId) {
 
   const member = chat.members[duty.userId];
   member.stats.rejectedCount = (member.stats.rejectedCount || 0) + 1;
+  member.stats.streak = 0;
 
   duty.status = "active";
   duty.submittedAt = null;
@@ -158,6 +188,8 @@ function autoConfirmPendingDuties() {
     if (!duty || duty.date !== today || duty.status !== "pending_confirmation") continue;
 
     duty.status = "confirmed";
+    duty.confirmedAt = new Date().toISOString();
+    duty.resolvedBy = "auto";
     const member = chat.members[duty.userId];
     if (member) {
       const points = config.points.perDuty;
@@ -168,11 +200,6 @@ function autoConfirmPendingDuties() {
       updateBadges(member);
     }
     markTasksCompletedOn(chatId, duty.date, duty.taskIds || []);
-
-    chat.history = chat.history || [];
-    chat.history.push({ ...duty, resolvedBy: "auto" });
-    chat.currentDuty = null;
-    chat.schedule.currentIndex = (chat.schedule.currentIndex || 0) + 1;
     updateChat(chatId, chat);
     results.push({ chatId, userId: duty.userId });
   }
@@ -206,6 +233,7 @@ function setNextDutyManually(chatId) {
 
 module.exports = {
   getTodayPerson,
+  getTomorrowPerson,
   getTodayDateStr,
   ensureDutyForToday,
   submitDutyForConfirmation,

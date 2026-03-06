@@ -6,6 +6,11 @@ const taskService = require("../services/taskService");
 const memberService = require("../services/memberService");
 const { getChat } = require("../storage/storage");
 const logger = require("../lib/logger");
+const ui = require("../ui/ui");
+
+function replyMenuKeyboard() {
+  return ui.replyMenuKeyboard();
+}
 
 function mainMenuKeyboardForUser(chatId, userId) {
   const rows = [
@@ -36,18 +41,17 @@ async function handleStart(bot, msg) {
   const chatId = msg.chat.id;
   const chat = getChat(chatId);
   if (!chat.schedule?.order?.length) {
-    await bot.sendMessage(
-      chatId,
-      "🏠 *Семейный бот*\n\nДобро пожаловать! Чтобы начать, каждый участник должен написать:\n\n`/join`\n\nПосле этого откройте меню: /help",
-      { parse_mode: "Markdown" }
-    );
+    await bot.sendMessage(chatId, ui.homeCard({ hasFamily: false }), {
+      parse_mode: "HTML",
+      reply_markup: replyMenuKeyboard(),
+      disable_web_page_preview: true,
+    });
     return;
   }
   dutyService.ensureDutyForToday(chatId);
-  const title = "🏠 Семейный бот";
-  const subtitle = "Выберите действие:";
-  await bot.sendMessage(chatId, `${title}\n\n${subtitle}`, {
-    reply_markup: mainMenuKeyboardForUser(chatId, msg.from?.id),
+  await bot.sendMessage(chatId, ui.homeCard({ hasFamily: true }), {
+    parse_mode: "HTML",
+    reply_markup: replyMenuKeyboard(),
   });
 }
 
@@ -56,10 +60,11 @@ async function handleStart(bot, msg) {
  */
 async function handleHelp(bot, msg) {
   const chatId = msg.chat.id;
+  const chat = getChat(chatId);
   await bot.sendMessage(
     chatId,
-    "🏠 *Семейный бот*\n\n📜 Команды:\n`/join` — вступить в семью\n`/today` — кто дежурный\n`/tasks` — задачи на сегодня\n`/stats` — ваша статистика\n`/setadmin` — стать админом (один на чат)\n`/help` — это меню\n\n👇 Или выберите кнопку ниже:",
-    { parse_mode: "Markdown", reply_markup: mainMenuKeyboardForUser(chatId, msg.from?.id) }
+    ui.helpCard({ adminIsSet: chat.settings?.adminId != null }),
+    { parse_mode: "HTML", reply_markup: replyMenuKeyboard(), disable_web_page_preview: true }
   );
 }
 
@@ -93,18 +98,15 @@ async function sendTodayTasks(bot, chatId, userId, editMessageId) {
   const person = dutyService.getTodayPerson(chatId);
   const tasks = taskService.getTasksForDate(chatId, today);
   if (!person) {
-    await bot.editMessageText("📋 *Задачи на сегодня*\n\nНет участников. Напишите /join", {
+    await bot.editMessageText("<b>📋 Задачи на сегодня</b>\n\nНет участников. Нажмите «ℹ️ Помощь».", {
       chat_id: chatId,
       message_id: editMessageId,
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
       reply_markup: backOnlyKeyboard(),
     });
     return;
   }
-  let text = `📋 *Задачи на сегодня*\n`;
-  text += `👤 Дежурный: ${person.name}\n`;
-  text += `\n`;
-  tasks.forEach((t) => (text += `• ${t.title}\n`));
+  const text = ui.tasksCard({ dateStr: today, personName: person.name, tasks });
   const duty = getChat(chatId).currentDuty;
   const canMarkDone = duty && duty.status === "active" && duty.userId === userId;
   const rows = [];
@@ -113,20 +115,18 @@ async function sendTodayTasks(bot, chatId, userId, editMessageId) {
   await bot.editMessageText(text, {
     chat_id: chatId,
     message_id: editMessageId,
-    parse_mode: "Markdown",
+    parse_mode: "HTML",
     reply_markup: { inline_keyboard: rows },
   });
 }
 
 async function sendWhoDuty(bot, chatId, editMessageId) {
   const person = dutyService.getTodayPerson(chatId);
-  const text = person
-    ? `👤 *Кто дежурный*\n\nСегодня дежурный: *${person.name}*`
-    : "👤 *Кто дежурный*\n\nНет участников. Напишите /join";
+  const text = ui.whoCard({ personName: person?.name });
   await bot.editMessageText(text, {
     chat_id: chatId,
     message_id: editMessageId,
-    parse_mode: "Markdown",
+    parse_mode: "HTML",
     reply_markup: backOnlyKeyboard(),
   });
 }
@@ -135,29 +135,19 @@ async function sendStats(bot, chatId, userId, editMessageId) {
   const ratingService = require("../services/ratingService");
   const stats = ratingService.getMemberStats(chatId, userId);
   if (!stats) {
-    await bot.editMessageText("📊 *Статистика*\n\nВы не в семье. Напишите /join", {
+    await bot.editMessageText(ui.statsCard(null), {
       chat_id: chatId,
       message_id: editMessageId,
-      parse_mode: "Markdown",
+      parse_mode: "HTML",
       reply_markup: backOnlyKeyboard(),
     });
     return;
   }
-  let text = `📊 *Статистика: ${stats.name}*\n\n`;
-  text += `⭐ Очки: *${stats.points}*\n`;
-  text += `🔥 Стрик: *${stats.streak}*\n`;
-  text += `\n`;
-  text += `Дежурств: ${stats.dutyCount} │ ✓ Подтверждено: ${stats.confirmedCount}\n`;
-  text += `Отклонено: ${stats.rejectedCount} │ Авто: ${stats.autoConfirmedCount}\n`;
-  text += `\n`;
-  const badges = (stats.badges || []).join(", ") || "—";
-  const streakBadges = (stats.streakBadges || []).join(", ") || "—";
-  text += `🏅 Бейджи: ${badges}\n`;
-  text += `🔥 Стрик-бейджи: ${streakBadges}`;
+  const text = ui.statsCard(stats);
   await bot.editMessageText(text, {
     chat_id: chatId,
     message_id: editMessageId,
-    parse_mode: "Markdown",
+    parse_mode: "HTML",
     reply_markup: backOnlyKeyboard(),
   });
 }
@@ -165,20 +155,11 @@ async function sendStats(bot, chatId, userId, editMessageId) {
 async function sendRating(bot, chatId, editMessageId) {
   const ratingService = require("../services/ratingService");
   const rating = ratingService.getRating(chatId);
-  let text = "🏆 *Рейтинг*\n\n";
-  if (rating.length === 0) {
-    text += "Пока никого. Напишите /join";
-  } else {
-    const medals = ["🥇", "🥈", "🥉"];
-    rating.forEach((r, i) => {
-      const medal = medals[i] || "  ";
-      text += `${medal} *${r.name}* — ${r.points} очков (стрик ${r.streak})\n`;
-    });
-  }
+  const text = ui.ratingCard(rating);
   await bot.editMessageText(text, {
     chat_id: chatId,
     message_id: editMessageId,
-    parse_mode: "Markdown",
+    parse_mode: "HTML",
     reply_markup: backOnlyKeyboard(),
   });
 }
@@ -188,7 +169,7 @@ async function sendAdminPanel(bot, chatId, userId, editMessageId) {
     await bot.answerCallbackQuery(editMessageId);
     return;
   }
-  const text = "⚙️ *Админ-панель*\n\nУправление задачами и дежурными.";
+  const text = ui.adminCard({ isAdmin: true });
   const keyboard = {
     inline_keyboard: [
       [
@@ -202,7 +183,7 @@ async function sendAdminPanel(bot, chatId, userId, editMessageId) {
   await bot.editMessageText(text, {
     chat_id: chatId,
     message_id: editMessageId,
-    parse_mode: "Markdown",
+    parse_mode: "HTML",
     reply_markup: keyboard,
   });
 }
@@ -211,10 +192,10 @@ async function sendAdminPanel(bot, chatId, userId, editMessageId) {
 async function handleMenuBack(bot, query) {
   const chatId = query.message.chat.id;
   const userId = query.from.id;
-  await bot.editMessageText("🏠 *Семейный бот*\n\nВыберите действие:", {
+  await bot.editMessageText(ui.homeCard({ hasFamily: true }), {
     chat_id: chatId,
     message_id: query.message.message_id,
-    parse_mode: "Markdown",
+    parse_mode: "HTML",
     reply_markup: mainMenuKeyboardForUser(chatId, userId),
   });
   await bot.answerCallbackQuery(query.id);
@@ -226,4 +207,5 @@ module.exports = {
   handleMenuCallback,
   handleMenuBack,
   mainMenuKeyboardForUser,
+  replyMenuKeyboard,
 };
