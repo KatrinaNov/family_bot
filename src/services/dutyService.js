@@ -74,7 +74,11 @@ function ensureDutyForToday(chatId) {
     chat.currentDuty = null;
     chat.schedule.currentIndex = (chat.schedule.currentIndex || 0) + 1;
   }
-  const person = getTodayPerson(chatId);
+  // Важно: брать дежурного из уже изменённого chat (с новым currentIndex), а не из getChat(),
+  // иначе getTodayPerson(chatId) загрузит данные с диска со старым index и вернёт вчерашнего дежурного.
+  const order = chat.schedule?.order || [];
+  const idx = (chat.schedule.currentIndex || 0) % order.length;
+  const person = chat.members[order[idx]] || null;
   if (!person) return null;
 
   const taskList = getTasksForDate(chatId, today);
