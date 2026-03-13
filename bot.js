@@ -110,12 +110,11 @@ function sendTasksWithButton(chatId) {
   return bot.sendMessage(chatId, text, opts);
 }
 
-function sendCongratsAndTomorrow(chatId) {
-  const name = todayPerson();
-  const next = nextPerson();
+function sendCongratsAndTomorrow(chatId, completedName) {
+  const tomorrowPerson = todayPerson();
   bot.sendMessage(
     chatId,
-    `🎉 Молодец, ${name}! +2 балла в рейтинг.\n\nЗавтра дежурит: **${next}**`,
+    `🎉 Молодец, ${completedName}! +2 балла в рейтинг.\n\nЗавтра дежурит: **${tomorrowPerson}**`,
     { parse_mode: "Markdown" }
   );
 }
@@ -367,7 +366,7 @@ async function run() {
         data.dutyIndex++;
         save();
         bot.sendMessage(data.chatId, `⏰ Админ не ответил. Выполнение засчитано автоматически.`);
-        sendCongratsAndTomorrow(data.chatId);
+        sendCongratsAndTomorrow(data.chatId, name);
         return;
       }
 
@@ -430,7 +429,7 @@ async function run() {
       data.dutyIndex++;
       save();
       bot.sendMessage(chatId, "✅ Подтверждено. +2 балла.");
-      sendCongratsAndTomorrow(chatId);
+      sendCongratsAndTomorrow(chatId, name);
       bot.answerCallbackQuery(q.id);
       return;
     }
