@@ -99,7 +99,7 @@ function getEventsForDate(dateStr) {
   return data.events.filter((e) => e.date === dateStr).sort((a, b) => (a.time || "00:00").localeCompare(b.time || "00:00"));
 }
 
-function getUpcomingEvents(limitDays = 60) {
+function getUpcomingEvents(limitDays = 90) {
   if (!data.events || !data.events.length) return [];
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -192,8 +192,8 @@ function formatEventLine(e) {
 }
 
 function sendCalendarList(chatId, userId) {
-  const upcoming = getUpcomingEvents(60);
-  let text = "📅 **Ближайшие события**\n\n";
+  const upcoming = getUpcomingEvents(90);
+  let text = "📅 **Ближайшие события (3 месяца)**\n\n";
   if (upcoming.length === 0) {
     text += "Пока ничего не запланировано.";
   } else {
@@ -217,10 +217,8 @@ function sendCalendarList(chatId, userId) {
   if (userId != null && isMember(userId)) {
     rows.push([{ text: "➕ Добавить событие", callback_data: "calendar:add" }]);
   }
-  upcoming.slice(0, 15).forEach((e) => {
-    const typeInfo = EVENT_TYPES.find((t) => t.id === e.type) || EVENT_TYPES[3];
-    const shortTitle = (e.title + (e.time ? ` ${e.time}` : "")).slice(0, 22);
-    const row = [{ text: `📄 ${formatEventDate(e.date)} ${shortTitle}`, callback_data: `calendar:show:${e.id}` }];
+  upcoming.slice(0, 20).forEach((e) => {
+    const row = [{ text: "📄", callback_data: `calendar:show:${e.id}` }];
     if (isAdmin(userId)) row.push({ text: "✏️", callback_data: `calendar:edit:${e.id}` }, { text: "🗑", callback_data: `calendar:del:${e.id}` });
     rows.push(row);
   });
