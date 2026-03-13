@@ -223,11 +223,11 @@ async function run() {
 
   // ---- Утро 6:00 — мем ----
   cron.schedule(
-    "0 6 * * *",
+    "0 9 * * *",
     async () => {
       if (data.chatId) await sendMorningMeme(data.chatId);
     },
-    { timezone: "Europe/Berlin" }
+    { timezone: "Europe/Minsk" }
   );
 
   // ---- Утро 7:30 — дежурство ----
