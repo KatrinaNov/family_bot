@@ -24,6 +24,7 @@ const DEFAULT_DATA = {
   daySkipped: false,
   memberIds: {},
   adminId: null,
+  /** tasks: null | string[] | { text, period: "daily"|"weekly", weekday?: 0-6 }[] */
   tasks: null,
 };
 
