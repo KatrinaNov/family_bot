@@ -26,6 +26,8 @@ const DEFAULT_DATA = {
   adminId: null,
   /** tasks: null | string[] | { text, period: "daily"|"weekly", weekday?: 0-6 }[] */
   tasks: null,
+  /** Календарь: { id, title, date (YYYY-MM-DD), type, description? }[] */
+  events: [],
 };
 
 const GIST_FILENAME = "family_bot_data.json";
