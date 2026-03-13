@@ -5,11 +5,12 @@ const express = require("express");
 const storage = require("./storageBot");
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
-const ADMIN_ID = process.env.ADMIN_TELEGRAM_ID ? Number(process.env.ADMIN_TELEGRAM_ID) : null;
+const ADMIN_ID_ENV = process.env.ADMIN_TELEGRAM_ID ? Number(process.env.ADMIN_TELEGRAM_ID) : null;
 
 let data;
+let waitingForTaskFrom = null;
 
-const TASKS = [
+const DEFAULT_TASKS = [
   "🍽 Помыть посуду",
   "🗑 Собрать мусор",
   "🧸 Разложить вещи",
@@ -28,20 +29,29 @@ function todayPerson() {
   return data.family[data.dutyIndex % data.family.length];
 }
 
+function getTasks() {
+  if (data.tasks && data.tasks.length > 0) return data.tasks;
+  return DEFAULT_TASKS;
+}
+
+function isAdmin(userId) {
+  if (ADMIN_ID_ENV) return userId === ADMIN_ID_ENV;
+  return data.adminId != null && userId === data.adminId;
+}
+
 function save() {
   storage.save(data).catch((err) => console.error("Save error", err));
 }
 
-function mainMenu(chatId) {
+function mainMenu(chatId, userId) {
+  const rows = [
+    ["📅 Кто сегодня", "📋 Список дел"],
+    ["🏆 Рейтинг", "📊 Статистика"],
+    ["⏭ Пропустить"],
+  ];
+  if (userId != null && isAdmin(userId)) rows.push(["⚙️ Админ"]);
   bot.sendMessage(chatId, "🏠 Семейное меню", {
-    reply_markup: {
-      keyboard: [
-        ["📅 Кто сегодня", "📋 Список дел"],
-        ["🏆 Рейтинг", "📊 Статистика"],
-        ["⏭ Пропустить", "😈 Жесткий режим"],
-      ],
-      resize_keyboard: true,
-    },
+    reply_markup: { keyboard: rows, resize_keyboard: true },
   });
 }
 
@@ -104,6 +114,8 @@ async function run() {
   if (!data.memberIds) data.memberIds = {};
   if (data.dutyStatus === undefined) data.dutyStatus = "none";
   if (data.daySkipped === undefined) data.daySkipped = false;
+  if (data.adminId === undefined) data.adminId = null;
+  if (data.tasks === undefined) data.tasks = null;
   save();
 
   // ---- Команды ----
@@ -120,6 +132,7 @@ async function run() {
 Открыть меню:
 /help`
     );
+    mainMenu(msg.chat.id, msg.from?.id);
   });
 
   bot.onText(/\/help/, (msg) => {
@@ -134,11 +147,13 @@ async function run() {
 /stats — статистика
 /skip — пропуск
 /hardcore — жесткий режим
+/setadmin — стать админом (первый в чате)
+/admin — панель админа (задания, режим)
 /test — тест дежурного
 
 или пользуйся кнопками 👇`
     );
-    mainMenu(msg.chat.id);
+    mainMenu(msg.chat.id, msg.from?.id);
   });
 
   bot.onText(/\/join/, (msg) => {
@@ -163,7 +178,7 @@ async function run() {
 
   bot.onText(/\/tasks/, (msg) => {
     let text = "📋 Сегодня нужно:\n\n";
-    TASKS.forEach((t) => (text += "• " + t + "\n"));
+    getTasks().forEach((t) => (text += "• " + t + "\n"));
     bot.sendMessage(data.chatId, text);
   });
 
@@ -204,21 +219,77 @@ async function run() {
     );
   });
 
+  bot.onText(/\/setadmin/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const name = getName(msg.from);
+    if (!data.family.includes(name)) {
+      bot.sendMessage(chatId, "Сначала напишите /join.");
+      return;
+    }
+    if (data.adminId != null && !isAdmin(userId)) {
+      bot.sendMessage(chatId, "Админ уже назначен. Только он может передать права.");
+      return;
+    }
+    data.adminId = userId;
+    save();
+    bot.sendMessage(chatId, "✅ Вы назначены админом. Подтверждать/отклонять дежурства и редактировать задания — через /admin или кнопку «⚙️ Админ».");
+    mainMenu(chatId, userId);
+  });
+
+  bot.onText(/\/admin/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from?.id;
+    if (!isAdmin(userId)) {
+      bot.sendMessage(chatId, "Только админ может открыть панель.");
+      return;
+    }
+    sendAdminPanel(chatId);
+  });
+
+  function sendAdminPanel(chatId) {
+    const tasks = getTasks();
+    bot.sendMessage(chatId, `⚙️ Админ\n\nЖесткий режим: ${data.hardcore ? "ВКЛ" : "ВЫКЛ"}\nЗаданий: ${tasks.length}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: data.hardcore ? "😈 Выкл жесткий режим" : "😈 Вкл жесткий режим", callback_data: "admin:hardcore" }],
+          [{ text: "➕ Добавить задание", callback_data: "admin:add_task" }],
+          [{ text: "📋 Список заданий (удалить)", callback_data: "admin:list_tasks" }],
+          [{ text: "⏭ След. дежурный (без штрафа)", callback_data: "admin:next_duty" }],
+        ],
+      },
+    });
+  }
+
   // ---- Кнопки меню ----
   bot.on("message", (msg) => {
     const t = msg.text;
-    if (t === "📅 Кто сегодня") bot.sendMessage(data.chatId, `Сегодня: ${todayPerson()}`);
+    const chatId = msg.chat.id;
+    const userId = msg.from?.id;
+
+    if (waitingForTaskFrom === userId && isAdmin(userId) && t && !t.startsWith("/")) {
+      if (!data.tasks) data.tasks = [...getTasks()];
+      data.tasks.push(t.trim());
+      save();
+      waitingForTaskFrom = null;
+      bot.sendMessage(chatId, `✅ Задание добавлено: «${t.trim()}»`);
+      return;
+    }
+    waitingForTaskFrom = null;
+
+    if (t === "📅 Кто сегодня") bot.sendMessage(chatId, `Сегодня: ${todayPerson()}`);
     if (t === "📋 Список дел") {
       let text = "📋 Дела:\n\n";
-      TASKS.forEach((a) => (text += "• " + a + "\n"));
-      bot.sendMessage(data.chatId, text);
+      getTasks().forEach((a) => (text += "• " + a + "\n"));
+      bot.sendMessage(chatId, text);
     }
     if (t === "🏆 Рейтинг")
-      bot.sendMessage(data.chatId, Object.entries(data.stats).map((e) => e.join(": ")).join("\n"));
+      bot.sendMessage(chatId, Object.entries(data.stats).map((e) => e.join(": ")).join("\n"));
     if (t === "📊 Статистика")
-      bot.sendMessage(data.chatId, Object.entries(data.fails).map((e) => e.join(": ") + " косяков").join("\n"));
+      bot.sendMessage(chatId, Object.entries(data.fails).map((e) => e.join(": ") + " косяков").join("\n"));
     if (t === "⏭ Пропустить") bot.emit("text", { text: "/skip", chat: msg.chat, from: msg.from });
     if (t === "😈 Жесткий режим") bot.emit("text", { text: "/hardcore", chat: msg.chat, from: msg.from });
+    if (t === "⚙️ Админ") bot.emit("text", { text: "/admin", chat: msg.chat, from: msg.from });
   });
 
   // ---- Утро 6:00 — мем ----
@@ -242,7 +313,7 @@ async function run() {
       save();
 
       let text = `☀️ Доброе утро\nСегодня дежурит: ${name}\n\n`;
-      TASKS.forEach((t) => (text += "• " + t + "\n"));
+      getTasks().forEach((t) => (text += "• " + t + "\n"));
 
       bot.sendMessage(data.chatId, text, {
         reply_markup: {
@@ -289,12 +360,86 @@ async function run() {
 
   // ---- Inline: выполнение ----
   bot.on("callback_query", (q) => {
+    const fromId = q.from.id;
+    const chatId = data.chatId || q.message?.chat?.id;
+
+    if (q.data === "admin:hardcore") {
+      if (!isAdmin(fromId)) {
+        bot.answerCallbackQuery(q.id, { text: "Только админ." });
+        return;
+      }
+      data.hardcore = !data.hardcore;
+      save();
+      bot.sendMessage(chatId, `😈 Жесткий режим: ${data.hardcore ? "ВКЛ" : "ВЫКЛ"}`);
+      bot.answerCallbackQuery(q.id);
+      return;
+    }
+
+    if (q.data === "admin:add_task") {
+      if (!isAdmin(fromId)) {
+        bot.answerCallbackQuery(q.id, { text: "Только админ." });
+        return;
+      }
+      waitingForTaskFrom = fromId;
+      bot.sendMessage(chatId, "Напишите текст нового задания (одним сообщением):");
+      bot.answerCallbackQuery(q.id);
+      return;
+    }
+
+    if (q.data === "admin:list_tasks") {
+      if (!isAdmin(fromId)) {
+        bot.answerCallbackQuery(q.id, { text: "Только админ." });
+        return;
+      }
+      const tasks = getTasks();
+      const buttons = tasks.map((_, i) => ({ text: `🗑 ${i + 1}`, callback_data: `task_del:${i}` }));
+      const rows = [];
+      for (let i = 0; i < buttons.length; i += 3) rows.push(buttons.slice(i, i + 3));
+      if (rows.length === 0) {
+        bot.sendMessage(chatId, "Нет заданий. Добавьте через Админ → Добавить задание.");
+      } else {
+        bot.sendMessage(chatId, "Удалить задание (нажмите номер):\n\n" + tasks.map((t, i) => `${i + 1}. ${t}`).join("\n"), {
+          reply_markup: { inline_keyboard: rows },
+        });
+      }
+      bot.answerCallbackQuery(q.id);
+      return;
+    }
+
+    if (q.data === "admin:next_duty") {
+      if (!isAdmin(fromId)) {
+        bot.answerCallbackQuery(q.id, { text: "Только админ." });
+        return;
+      }
+      data.dutyIndex++;
+      save();
+      bot.sendMessage(chatId, `⏭ Дежурный сменён. Теперь: ${todayPerson()}`);
+      bot.answerCallbackQuery(q.id);
+      return;
+    }
+
+    if (q.data && q.data.startsWith("task_del:")) {
+      if (!isAdmin(fromId)) {
+        bot.answerCallbackQuery(q.id, { text: "Только админ." });
+        return;
+      }
+      const idx = parseInt(q.data.replace("task_del:", ""), 10);
+      if (!data.tasks) data.tasks = [...getTasks()];
+      if (idx >= 0 && idx < data.tasks.length) {
+        const removed = data.tasks.splice(idx, 1)[0];
+        if (data.tasks.length === 0) data.tasks = null;
+        save();
+        bot.sendMessage(chatId, `🗑 Удалено: «${removed}»`);
+      }
+      bot.answerCallbackQuery(q.id);
+      return;
+    }
+
     const name = todayPerson();
     if (!name) {
       bot.answerCallbackQuery(q.id, { text: "Сначала добавьте участников: /join" });
       return;
     }
-    const fromId = q.from.id;
     const dutyUserId = data.memberIds[name] ?? null;
 
     if (q.data === "done") {
@@ -311,11 +456,8 @@ async function run() {
     }
 
     if (q.data === "duty_confirm") {
-      const canConfirm = ADMIN_ID ? fromId === ADMIN_ID : fromId !== dutyUserId && fromId !== undefined;
-      if (!canConfirm) {
-        bot.answerCallbackQuery(q.id, {
-          text: ADMIN_ID ? "Подтверждать может только админ" : "Подтверждать должен другой участник (не дежурный)",
-        });
+      if (!isAdmin(fromId)) {
+        bot.answerCallbackQuery(q.id, { text: "Подтверждать может только админ." });
         return;
       }
       if (data.dutyStatus !== "pending") {
@@ -332,11 +474,8 @@ async function run() {
     }
 
     if (q.data === "duty_reject") {
-      const canReject = ADMIN_ID ? fromId === ADMIN_ID : fromId !== dutyUserId && fromId !== undefined;
-      if (!canReject) {
-        bot.answerCallbackQuery(q.id, {
-          text: ADMIN_ID ? "Отклонять может только админ" : "Отклонять должен другой участник (не дежурный)",
-        });
+      if (!isAdmin(fromId)) {
+        bot.answerCallbackQuery(q.id, { text: "Отклонять может только админ." });
         return;
       }
       if (data.dutyStatus !== "pending") {

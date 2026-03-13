@@ -23,6 +23,8 @@ const DEFAULT_DATA = {
   dutyStatus: "none",
   daySkipped: false,
   memberIds: {},
+  adminId: null,
+  tasks: null,
 };
 
 const GIST_FILENAME = "family_bot_data.json";
