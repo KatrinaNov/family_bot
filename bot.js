@@ -154,6 +154,11 @@ function save() {
   storage.save(data).catch((err) => console.error("Save error", err));
 }
 
+function escapeMarkdown(str) {
+  if (str == null || typeof str !== "string") return "";
+  return str.replace(/\\/g, "\\\\").replace(/\*/g, "\\*").replace(/_/g, "\\_").replace(/`/g, "\\`").replace(/\[/g, "\\[");
+}
+
 function mainMenu(chatId, userId) {
   let rows;
   if (userId != null && !isMember(userId)) {
@@ -174,8 +179,8 @@ function mainMenu(chatId, userId) {
 function sendTasksWithButton(chatId) {
   const name = todayPerson();
   const tasks = getTasksForDate(new Date());
-  let text = `📋 Сегодня дежурит: **${name || "—"}**\n\n`;
-  text += tasks.length ? tasks.map((t) => "• " + t).join("\n") : "Нет заданий на сегодня.";
+  let text = `📋 Сегодня дежурит: **${escapeMarkdown(name || "—")}**\n\n`;
+  text += tasks.length ? tasks.map((t) => "• " + escapeMarkdown(t)).join("\n") : "Нет заданий на сегодня.";
   const opts = { parse_mode: "Markdown" };
   if (name && tasks.length) {
     opts.reply_markup = {
@@ -207,7 +212,7 @@ function sendCalendarList(chatId, userId) {
       .forEach((date) => {
         text += `${formatEventDate(date)}\n`;
         byDate[date].forEach((e) => {
-          text += `  ${formatEventLine(e)}\n`;
+          text += `  ${escapeMarkdown(formatEventLine(e))}\n`;
         });
         text += "\n";
       });
@@ -230,7 +235,7 @@ function sendCongratsAndTomorrow(chatId, completedName) {
   const tomorrowPerson = todayPerson();
   bot.sendMessage(
     chatId,
-    `🎉 Молодец, ${completedName}! +2 балла в рейтинг.\n\nЗавтра дежурит: **${tomorrowPerson}**`,
+    `🎉 Молодец, ${escapeMarkdown(completedName)}! +2 балла в рейтинг.\n\nЗавтра дежурит: **${escapeMarkdown(tomorrowPerson)}**`,
     { parse_mode: "Markdown" }
   );
 }
@@ -482,7 +487,7 @@ async function run() {
     waitingForTaskEdit = null;
 
     if (t === "📅 Кто сегодня") {
-      bot.sendMessage(chatId, `Сегодня дежурит: **${todayPerson() || "—"}**`, { parse_mode: "Markdown" });
+      bot.sendMessage(chatId, `Сегодня дежурит: **${escapeMarkdown(todayPerson() || "—")}**`, { parse_mode: "Markdown" });
       return;
     }
     if (t === "📅 Календарь") {
@@ -551,13 +556,19 @@ async function run() {
       const calendarPromise = todayEvents.length
         ? bot.sendMessage(
             data.chatId,
-            "📅 **Сегодня в календаре:**\n\n" + todayEvents.map((e) => formatEventLine(e)).join("\n")
+            "📅 **Сегодня в календаре:**\n\n" + todayEvents.map((e) => escapeMarkdown(formatEventLine(e))).join("\n"),
+            { parse_mode: "Markdown" }
           )
         : Promise.resolve();
 
       sendTasksWithButton(data.chatId)
         .then(() => calendarPromise)
-        .then(() => sendMorningMeme(data.chatId));
+        .then(() => sendMorningMeme(data.chatId))
+        .catch((err) => {
+          console.error("9:00 cron error", err.message);
+          calendarPromise.catch(() => {});
+          sendMorningMeme(data.chatId).catch(() => {});
+        });
     },
     { timezone: TZ }
   );
@@ -571,8 +582,9 @@ async function run() {
       if (tomorrowEvents.length) {
         bot.sendMessage(
           data.chatId,
-          "📅 **Завтра в календаре:**\n\n" + tomorrowEvents.map((e) => formatEventLine(e)).join("\n")
-        );
+          "📅 **Завтра в календаре:**\n\n" + tomorrowEvents.map((e) => escapeMarkdown(formatEventLine(e))).join("\n"),
+          { parse_mode: "Markdown" }
+        ).catch((err) => console.error("20:00 calendar", err.message));
       }
       if (data.doneToday && data.dutyStatus === "confirmed") return;
       const name = todayPerson();
@@ -605,7 +617,7 @@ async function run() {
           const typeInfo = EVENT_TYPES.find((t) => t.id === e.type) || EVENT_TYPES[3];
           bot.sendMessage(
             data.chatId,
-            `⏰ Через 2 часа: **${e.title}** (${typeInfo.emoji} ${typeInfo.label})\n${formatEventDate(e.date)} в ${e.time}`
+            `⏰ Через 2 часа: **${escapeMarkdown(e.title)}** (${typeInfo.emoji} ${typeInfo.label})\n${formatEventDate(e.date)} в ${e.time}`
           );
         }
       });
@@ -749,8 +761,8 @@ async function run() {
         return;
       }
       const typeInfo = EVENT_TYPES.find((t) => t.id === e.type) || EVENT_TYPES[3];
-      let detail = `📅 **${e.title}**\n${formatEventDate(e.date)}${e.time ? " в " + e.time : ""}\n${typeInfo.emoji} ${typeInfo.label}`;
-      if (e.description) detail += `\n\n${e.description}`;
+      let detail = `📅 **${escapeMarkdown(e.title)}**\n${formatEventDate(e.date)}${e.time ? " в " + e.time : ""}\n${typeInfo.emoji} ${typeInfo.label}`;
+      if (e.description) detail += `\n\n${escapeMarkdown(e.description)}`;
       bot.sendMessage(chatId, detail, { parse_mode: "Markdown" });
       bot.answerCallbackQuery(q.id);
       return;
@@ -900,7 +912,7 @@ async function run() {
       }
       data.dutyIndex++;
       save();
-      bot.sendMessage(chatId, `⏭ Дежурный заменён. Теперь: **${todayPerson()}**`, { parse_mode: "Markdown" });
+      bot.sendMessage(chatId, `⏭ Дежурный заменён. Теперь: **${escapeMarkdown(todayPerson())}**`, { parse_mode: "Markdown" });
       bot.answerCallbackQuery(q.id);
       return;
     }
