@@ -2,6 +2,8 @@ require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const cron = require("node-cron");
 const express = require("express");
+const path = require("path");
+const fs = require("fs");
 const storage = require("./storageBot");
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
@@ -156,6 +158,16 @@ function save() {
 
 function escapeMarkdown(str) {
   if (str == null || typeof str !== "string") return "";
+  return str
+    .replace(/\\/g, "\\\\")
+    .replace(/\*/g, "\\*")
+    .replace(/_/g, "\\_")
+    .replace(/`/g, "\\`")
+    .replace(/\[/g, "\\[");
+}
+
+function escapeMarkdown(str) {
+  if (str == null || typeof str !== "string") return "";
   return str.replace(/\\/g, "\\\\").replace(/\*/g, "\\*").replace(/_/g, "\\_").replace(/`/g, "\\`").replace(/\[/g, "\\[");
 }
 
@@ -235,26 +247,135 @@ function sendCongratsAndTomorrow(chatId, completedName) {
   const tomorrowPerson = todayPerson();
   bot.sendMessage(
     chatId,
-    `🎉 Молодец, ${escapeMarkdown(completedName)}! +2 балла в рейтинг.\n\nЗавтра дежурит: **${escapeMarkdown(tomorrowPerson)}**`,
+    `🎉 Молодец, ${escapeMarkdown(completedName)}! +2 балла в рейтинг.\n\nЗавтра дежурит: **${escapeMarkdown(
+      tomorrowPerson
+    )}**`,
     { parse_mode: "Markdown" }
   );
 }
 
+const LOCAL_MEMES = [
+  // Примеры. Положите свои файлы в папку ./images и замените пути/тексты.
+  {
+    image: "images/meme1.webp",
+    text: "Интересный факт: На Луне нет ветра, поэтому следы астронавтов останутся там навсегда.",
+  },
+  {
+    image: "images/meme2.jpg",
+    text: "Интересный факт: На Юпитере и Сатурне атмосферное давление настолько высокое, что углерод превращается в алмазы.",
+  },
+  {
+    image: "images/meme3.jpg",
+    text: "Интересный факт: совместные бытовые дела снижают уровень стресса в семье — главное, чтобы награда была не только баллами, но и благодарностью.",
+  },
+  {
+    image: "images/meme4.jpg",
+    text: "Интересный факт: Каждый день на Землю падает около 200 тысяч метеоритов.",
+  },
+  {
+    image: "images/meme5.jpg",
+    text: "Интересный факт: Попугаи Кеа живут в Новой Зеландии и иногда охотятся на овец.",
+  },
+  {
+    image: "images/meme6.jpg",
+    text: "Память золотой рыбки длится около 3 секунд.",
+  },
+  {
+    image: "images/meme7.jpg",
+    text: "Интересный факт: Самый популярный напиток в мире — кофе. Ежегодно люди употребляют около 400 млрд. чашек.",
+  },
+  {
+    image: "images/meme8.jpg",
+    text: "Интересный факт: А вы Знали что Сникерс назвали в честь любимой лошади, принадлежавшей семье кондитера Фрэнка Марса?",
+  },
+  {
+    image: "images/meme9.jpg",
+    text: "Интересный факт: Самая длинная медуза, измеренная человеком, составляла в длину почти 50 метров — половину длины футбольного поля.",
+  },
+  {
+    image: "images/meme10.webp",
+    text: "Интересный факт: У медуз нет мозгов и кровеносных сосудов.",
+  },
+  {
+    image: "images/meme11.jpg",
+    text: "Интересный факт: Чайная ложка мёда – результат работы всей жизни 12 пчёл.",
+  },
+  {
+    image: "images/meme12.jpeg",
+    text: "Интересный факт: Самая крупная жемчужина в мире достигает 6 килограммов в весе.",
+  },
+  {
+    image: "images/meme13.jpg",
+    text: "Интересный факт: Законодательство США допускало отправку детей по почте до 1913 года.",
+  },
+  {
+    image: "images/meme14.jpg",
+    text: "Интересный факт: Среднее облако весит порядка 500 тонн, столько же весят 80 слонов.",
+  },
+  {
+    image: "images/meme15.jpg",
+    text: "Интересный факт: Скорость распространения лавы после извержения, близка к скорости бега гончей.",
+  },
+  {
+    image: "images/meme16.jpeg",
+    text: "Интересный факт: Изначально, отвертка была изобретена для выковыривания гвоздей, шуруп был изобретен на 100 лет позже.",
+  },
+  {
+    image: "images/meme17.jpg",
+    text: "Интересный факт: В Антарктиде существует единственная река – Оникс, она течет всего 60 дней в году",
+  }
+];
+
 async function sendMorningMeme(chatId) {
   const fallback = () =>
     bot.sendMessage(chatId, "☀️ Доброе утро! Хорошего дня 😄").catch(() => {});
+
   try {
-    const res = await fetch("https://meme-api.com/gimme/wholesomememes", { redirect: "follow" });
-    if (!res.ok) throw new Error(res.statusText);
-    const json = await res.json();
-    const url = json?.url;
-    if (url && /\.(jpg|jpeg|png|gif|webp)/i.test(url)) {
-      await bot.sendPhoto(chatId, url, { caption: "☀️ Мем на старт дня 😄" });
+    if (!Array.isArray(LOCAL_MEMES) || LOCAL_MEMES.length === 0) {
+      return fallback();
+    }
+    const idx = Math.floor(Math.random() * LOCAL_MEMES.length);
+    const meme = LOCAL_MEMES[idx];
+
+    // Локальный файл (из папки ./memes)
+    if (meme.file) {
+      const filePath = path.join(__dirname, meme.file);
+      if (fs.existsSync(filePath)) {
+        if (meme.text) {
+          await bot.sendPhoto(chatId, filePath, {
+            caption: `☀️ Мем на старт дня\n\n${meme.text}`,
+          });
+        } else {
+          await bot.sendPhoto(chatId, filePath, {
+            caption: "☀️ Мем на старт дня",
+          });
+        }
+        return;
+      }
+    }
+
+    // Запас: если указан внешний URL
+    if (meme.image) {
+      if (meme.text) {
+        await bot.sendPhoto(chatId, meme.image, {
+          caption: `☀️ Мем на старт дня\n\n${meme.text}`,
+        });
+      } else {
+        await bot.sendPhoto(chatId, meme.image, {
+          caption: "☀️ Мем на старт дня",
+        });
+      }
+      return;
+    }
+
+    if (meme.text) {
+      await bot.sendMessage(chatId, `☀️ Мем‑факт на утро:\n\n${meme.text}`);
       return;
     }
   } catch (e) {
-    console.error("Meme API error", e.message);
+    console.error("Local meme error", e.message);
   }
+
   fallback();
 }
 
