@@ -463,6 +463,7 @@ async function run() {
           [{ text: "➕ Добавить задание", callback_data: "admin:add_task" }],
           [{ text: "📋 Задания (удалить/редактировать)", callback_data: "admin:list_tasks" }],
           [{ text: "⏭ Заменить дежурного", callback_data: "admin:next_duty" }],
+          [{ text: "🧹 Сбросить статистику", callback_data: "admin:reset_stats" }],
         ],
       },
     });
@@ -984,6 +985,48 @@ async function run() {
       data.hardcore = !data.hardcore;
       save();
       bot.sendMessage(chatId, `😈 Жёсткий режим: ${data.hardcore ? "ВКЛ" : "ВЫКЛ"}`);
+      bot.answerCallbackQuery(q.id);
+      return;
+    }
+
+    if (q.data === "admin:reset_stats") {
+      if (!isAdmin(fromId)) {
+        bot.answerCallbackQuery(q.id, { text: "Только админ." });
+        return;
+      }
+      bot.sendMessage(chatId, "Сбросить рейтинг и статистику косяков у всех?", {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ Да, сбросить", callback_data: "admin:reset_stats_yes" },
+              { text: "❌ Отмена", callback_data: "admin:reset_stats_no" },
+            ],
+          ],
+        },
+      });
+      bot.answerCallbackQuery(q.id);
+      return;
+    }
+
+    if (q.data === "admin:reset_stats_yes") {
+      if (!isAdmin(fromId)) {
+        bot.answerCallbackQuery(q.id, { text: "Только админ." });
+        return;
+      }
+      Object.keys(data.stats || {}).forEach((k) => (data.stats[k] = 0));
+      Object.keys(data.fails || {}).forEach((k) => (data.fails[k] = 0));
+      save();
+      bot.sendMessage(chatId, "✅ Статистика сброшена.");
+      bot.answerCallbackQuery(q.id);
+      return;
+    }
+
+    if (q.data === "admin:reset_stats_no") {
+      if (!isAdmin(fromId)) {
+        bot.answerCallbackQuery(q.id, { text: "Только админ." });
+        return;
+      }
+      bot.sendMessage(chatId, "Ок, отменено.");
       bot.answerCallbackQuery(q.id);
       return;
     }
